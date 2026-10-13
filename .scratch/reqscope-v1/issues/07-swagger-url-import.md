@@ -1,0 +1,18 @@
+# 07 — Import from Swagger UI and specification URLs
+
+**What to build:** Start a project from the backend team's Swagger link or a raw specification URL, with clear fallback when automatic discovery is insufficient.
+
+**Blocked by:** 02 — Import and inspect local API specifications; 04 — Configure environments and authorize destinations; 06 — Use credentials without exposing them
+
+**Status:** ready-for-agent
+
+**Specification coverage:** User stories 3, 4, 5, 6, 7.
+
+- [ ] TUI approves source origins before network fetching; CLI imports and remote-reference fetching require existing applicable origin authorization.
+- [ ] Raw JSON/YAML URLs import through the existing contract path, preserving source location and refresh metadata without embedded credentials.
+- [ ] Static Swagger configuration discovery supports url, urls and embedded spec declarations in pages and referenced initializer/config resources.
+- [ ] Relative locations resolve against their containing resource; JavaScript is never executed and no browser runtime is required.
+- [ ] Multiple specifications are selectable in the TUI; CLI requires explicit selection. Failed discovery provides useful candidates and a raw-URL fallback.
+- [ ] Remote references obey origin approval and bounded size/depth; redirects, missing resources and cycles produce sanitized errors.
+- [ ] Import failures leave the prior project intact. Validation/preview never implicitly contacts an unapproved source.
+- [ ] Local HTTP fixture tests cover relative discovery, several candidates, raw URLs, fallback, authenticated imports, redirects and denied reference origins.
