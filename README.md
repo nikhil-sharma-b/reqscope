@@ -1,6 +1,6 @@
 # Reqscope
 
-Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. This first implementation initializes, inspects, validates and reopens projects. Importing specifications, sending HTTP requests, credentials and history are covered by later tickets.
+Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. It initializes and reopens projects, imports local Swagger/OpenAPI specifications, and inspects endpoints and schemas. Sending HTTP requests, credentials and history are covered by later tickets.
 
 Requires Go 1.26 or newer. Linux and macOS are the supported targets.
 
@@ -32,6 +32,24 @@ Add these patterns to a project's `.gitignore`:
 All application readers and writers take the same OS project lock. Writes validate the complete batch and check expected revisions before publishing a durable journal. Each resource is written through a synced temporary file and atomic rename. A reader first replays an interrupted journal under the lock, then loads the project. External edits conflicting with recovery block reopening and report the file to reconcile. External tools reading files directly do not participate in the application lock.
 
 The project files contain no credentials, grants or responses. Their local storage arrives in later tickets; this implementation does not create those stores.
+
+## Local specification imports
+
+```sh
+bin/reqscope spec import --input ./api/openapi.yaml --project ./my-api --preview --output json
+bin/reqscope spec import --input ./api/openapi.yaml --project ./my-api --output json
+bin/reqscope spec inspect --project ./my-api --output json
+bin/reqscope endpoint list --project ./my-api --output json
+bin/reqscope endpoint get ENDPOINT_UUID --project ./my-api --output json
+bin/reqscope schema list --project ./my-api --output json
+bin/reqscope schema get SCHEMA_UUID --project ./my-api --output json
+```
+
+Imports accept Swagger 2.0 and OpenAPI 3.0/3.1 in JSON or YAML. Select a file with `--input`; stdin imports are unavailable because local references need a directory root. References stay within the selected file's directory, reject symlinks, and never fetch remote URLs. Traversal is capped at 64 files, 64 levels, 100,000 visited values and 10 MiB total input. Missing references and cycles reject the import. Recursive schema contracts therefore require simplification before import.
+
+Preview resolves references and checks the supported structure without persisting resources. Applying an import atomically records source/module UUIDs in the manifest and stores the original document bytes, resolved import base, digest, operations and schemas in `specs/SOURCE_UUID.yaml`. Unknown extensions remain intact. Endpoint IDs derive from source UUID, method and path, independently of operationId. Each import creates a new source; refresh is a later ticket.
+
+Inspection includes inherited path parameters, operation inputs/responses, descriptions, tags and server/security context. `diagnostics` reports unsupported constructs; `complete` remains false because response schema validation is not implemented. A successful import means the contract can be inspected, not that its response constraints were fully validated.
 
 ## CLI authoring
 
@@ -71,7 +89,7 @@ Future execution precedence follows the specification: unsuccessful scenarios us
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint, request, response, case, scenario and history panes show empty states until their features arrive.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request, response, case, scenario and history panes show empty states until their features arrive.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
@@ -79,6 +97,7 @@ The project pane supports editing and saving the project name. Environment templ
 - `/` searches the focused pane; `n`/`N` advances filtered matches.
 - `i` or Enter edits the project name. Esc leaves insert mode and retains edits.
 - `Space p i/v/n/s/r` inspects, validates, renames, saves or reloads the project.
+- `Space s i` opens local import. Enter previews, a second Enter applies, and Esc cancels. `Space s s` opens schemas.
 - `Space e l` opens environment templates. `Space r i/r` opens request/response panes; `Space c l`, `Space s l` and `Space h l` open cases, scenarios and history. `Space /` opens endpoint search.
 - `?` shows help; `:` or `Space :` opens the command palette. Arrow keys select palette commands; Enter runs one.
 - `q` quits. Leaving a dirty project or quitting asks for save, discard or cancel.

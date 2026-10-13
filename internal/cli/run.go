@@ -20,6 +20,10 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   project init [NAME] [--input FILE|-] [--preview]
   project inspect|validate
   project update --input FILE|- [--preview]
+  spec import --input FILE [--preview]
+  spec inspect [SOURCE_ID]
+  endpoint list|get ID
+  schema list|get ID
   environment list|get ID_OR_NAME
   environment create|update --input FILE|- [--preview]
   input-schema list|get NAME
@@ -276,6 +280,9 @@ func execute(o options, in io.Reader) (any, error) {
 			root = "."
 		}
 		return project.Init(root, name, o.preview)
+	}
+	if group == "spec" || group == "endpoint" || group == "schema" {
+		return specificationCommand(o)
 	}
 	if group != "project" && group != "environment" {
 		return nil, project.Fail("invalid_input", "unknown command %q; use --help", group)
