@@ -8,6 +8,16 @@ import (
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 )
 
+const (
+	credentialNameField = iota
+	credentialKindField
+	credentialModuleField
+	credentialDestinationField
+	credentialPlacementField
+	credentialHeaderField
+	credentialValueField
+)
+
 var credentialFields = []string{"Name", "Kind: bearer/api-key/basic", "Module", "Exact destination URL", "Placement: header/query/body", "Field: empty for body", "Value: basic uses username:password"}
 
 func (m *Model) clearCredentialEntry() {
@@ -45,8 +55,8 @@ func (m *Model) credentialAction(action string) bool {
 }
 func (m *Model) saveCredential(session bool) {
 	f := m.credentialEntry
-	b := project.CredentialBinding{Name: f[0], Kind: f[1], Module: f[2], Destination: f[3], In: f[4], Field: f[5]}
-	if err := m.credentials.Save(m.root, m.activeEnvironment, b, f[6], session); err != nil {
+	b := project.CredentialBinding{Name: f[credentialNameField], Kind: f[credentialKindField], Module: f[credentialModuleField], Destination: f[credentialDestinationField], In: f[credentialPlacementField], Field: f[credentialHeaderField]}
+	if err := m.credentials.Save(m.root, m.activeEnvironment, b, f[credentialValueField], session); err != nil {
 		if pe, ok := err.(*project.Error); ok && pe.Code == "credential_unavailable" {
 			m.overlay = "credential-session"
 			m.mode = "NORMAL"
@@ -126,7 +136,7 @@ func (m *Model) credentialOverlay() string {
 				marker = "> "
 			}
 			value := m.credentialEntry[i]
-			if i == 6 {
+			if i == credentialValueField {
 				value = strings.Repeat("*", len([]rune(value)))
 			}
 			lines = append(lines, marker+label+": "+value)

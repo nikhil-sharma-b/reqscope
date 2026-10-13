@@ -56,6 +56,7 @@ type Exchange struct {
 	Body          string      `json:"body"`
 	RetainedBytes int         `json:"retainedBytes"`
 	Binary        bool        `json:"binary"`
+	BodyWithheld  bool        `json:"bodyWithheld,omitempty"`
 	Truncated     bool        `json:"truncated"`
 }
 
@@ -326,9 +327,6 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		c = DefaultCredentials
 	}
 	defer func() { err = c.SanitizeError(err) }()
-	if err := c.Refresh(root); err != nil {
-		return Exchange{}, err
-	}
 	p, err := PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
 	if err != nil {
 		return Exchange{}, err
@@ -389,7 +387,7 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 			return err
 		}
 		for _, item := range used {
-			if err := checkSecretPosition(items, current, req.URL.String(), p.draft.Module, item.In, item.Field, "{{secret:"+item.Name+"}}"); err != nil {
+			if err := checkSecretPosition(items, current, credentialPosition{Destination: req.URL.String(), Module: p.draft.Module, In: item.In, Field: item.Field}, "{{secret:"+item.Name+"}}"); err != nil {
 				return err
 			}
 		}

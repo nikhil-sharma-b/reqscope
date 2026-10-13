@@ -240,3 +240,27 @@ func TestJSONCredentialValuePreservesEscaping(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestTruncatedAndFormAuthenticationPositionsAreSanitized(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/form" {
+			w.Header().Set("Content-Type", "application/x-www-form-urlencoded")
+			io.WriteString(w, "access_token=unregistered-form-token&message=ok")
+		} else {
+			w.Header().Set("Content-Type", "application/json")
+			io.WriteString(w, `{"access_token":"unregistered-truncated-token","padding":"`+strings.Repeat("x", 200)+`"}`)
+		}
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	for _, target := range []string{"/json", "/form"} {
+		result, err := project.Send(context.Background(), root, "staging", project.RequestDraft{Module: "api", Method: "GET", URL: target, MaxBodyBytes: 80}, project.SendOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		raw, _ := json.Marshal(result)
+		if strings.Contains(string(raw), "unregistered-") {
+			t.Fatalf("authentication position leaked %s", raw)
+		}
+	}
+}

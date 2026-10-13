@@ -137,3 +137,24 @@ func TestCLIUnavailableStoreHasNoPlaintextFallback(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestUnavailableExistingStoreKeepsTUIRecoveryReachable(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	s, _ := project.Init(root, "Recovery", false)
+	e, _ := s.Resolve("staging")
+	e.BaseURLs["api"] = "https://example.test"
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	store := &protectedStore{values: map[string]string{}}
+	vault := project.NewCredentials(store)
+	b := project.CredentialBinding{Name: "key", Kind: "bearer", Module: "api", Destination: "https://example.test/", In: "header", Field: "Authorization"}
+	if err := vault.Save(root, "staging", b, "private-store-value", false); err != nil {
+		t.Fatal(err)
+	}
+	store.unavailable = true
+	var out, diag bytes.Buffer
+	code := cli.RunWithCredentials([]string{"tui", "--project", root, "--output", "json"}, strings.NewReader(""), &out, &diag, vault)
+	if code != 2 || !strings.Contains(out.String(), "requires terminal") {
+		t.Fatalf("TUI dispatcher blocked recovery: %d %s %s", code, &out, &diag)
+	}
+}

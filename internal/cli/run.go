@@ -166,7 +166,7 @@ func RunWithCredentials(args []string, in io.Reader, out, diag io.Writer, creden
 	if root, e := rootPath(o); e == nil {
 		if refreshErr := credentials.Refresh(root); refreshErr != nil {
 			var pe *project.Error
-			if errors.As(refreshErr, &pe) && pe.Code == "access_denied" && !(len(o.args) > 0 && (o.args[0] == "secret" || o.args[0] == "access")) {
+			if errors.As(refreshErr, &pe) && pe.Code == "access_denied" && !(len(o.args) > 0 && (o.args[0] == "secret" || o.args[0] == "access" || o.args[0] == "tui")) && !(len(o.args) == 0 && terminal(in, out)) {
 				return emit(o, nil, refreshErr, out, diag)
 			}
 		}

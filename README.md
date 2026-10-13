@@ -291,7 +291,9 @@ Registered values, their JSON/URL representations and basic encoding are
 redacted before runner results, errors, CLI previews, TUI rendering and response
 copying. Response authentication headers and common JSON authentication fields
 are redacted even for unregistered server-generated values. Binary response
-bodies expose metadata only. Arbitrary transformations or encodings performed by
+bodies expose metadata only. Invalid or incomplete structured JSON bodies are
+withheld when they cannot be safely sanitized; form-encoded authentication fields
+are redacted as well. Arbitrary transformations or encodings performed by
 a server can evade redaction; this is not guaranteed secret detection.
 
 Only ordinary project files and credential reference names belong in Git or

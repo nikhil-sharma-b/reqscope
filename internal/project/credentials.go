@@ -1,6 +1,7 @@
 package project
 
 import (
+	"bytes"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -269,7 +270,16 @@ func (c *Credentials) Inspect(root, env string) ([]SecretState, error) {
 	sort.Slice(result, func(i, j int) bool { return result[i].Name < result[j].Name })
 	return result, nil
 }
-func checkSecretPosition(items map[string]localCredential, review AccessReview, target, module, in, field, text string) error {
+
+type credentialPosition struct {
+	Destination string
+	Module      string
+	In          string
+	Field       string
+}
+
+func checkSecretPosition(items map[string]localCredential, review AccessReview, position credentialPosition, text string) error {
+	target, module, in, field := position.Destination, position.Module, position.In, position.Field
 	matches := secretReference.FindAllStringSubmatch(text, -1)
 	if strings.Contains(secretReference.ReplaceAllString(text, ""), "{{secret:") {
 		return Fail("invalid_input", "invalid secret reference")
@@ -323,7 +333,7 @@ func validateCredentials(root, env string, review AccessReview, req *http.Reques
 			if protectedHeader(name) && !secretReference.MatchString(v) {
 				return Fail("access_denied", "authentication headers require protected credential references")
 			}
-			if err := checkSecretPosition(items, review, req.URL.String(), d.Module, "header", name, v); err != nil {
+			if err := checkSecretPosition(items, review, credentialPosition{Destination: req.URL.String(), Module: d.Module, In: "header", Field: name}, v); err != nil {
 				return err
 			}
 		}
@@ -333,13 +343,13 @@ func validateCredentials(root, env string, review AccessReview, req *http.Reques
 			return Fail("access_denied", "secret query names are forbidden")
 		}
 		for _, v := range values {
-			if err := checkSecretPosition(items, review, req.URL.String(), d.Module, "query", name, v); err != nil {
+			if err := checkSecretPosition(items, review, credentialPosition{Destination: req.URL.String(), Module: d.Module, In: "query", Field: name}, v); err != nil {
 				return err
 			}
 		}
 	}
 	body, _ := ioRequestBody(req)
-	return checkSecretPosition(items, review, req.URL.String(), d.Module, "body", "", body)
+	return checkSecretPosition(items, review, credentialPosition{Destination: req.URL.String(), Module: d.Module, In: "body"}, body)
 }
 func protectedHeader(name string) bool {
 	switch strings.ToLower(name) {
@@ -459,7 +469,9 @@ func (c *Credentials) Sanitize(text string) string {
 // for server-generated values which are not in the registered-value set.
 func (c *Credentials) SanitizeJSON(raw []byte) []byte {
 	var v any
-	if json.Unmarshal(raw, &v) != nil {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if !json.Valid(raw) || decoder.Decode(&v) != nil {
 		return []byte(c.Sanitize(string(raw)))
 	}
 	var walk func(any) any
@@ -474,7 +486,13 @@ func (c *Credentials) SanitizeJSON(raw []byte) []byte {
 			return x
 		case map[string]any:
 			result := map[string]any{}
+			field, _ := x["name"].(string)
 			for k, item := range x {
+				if k == "value" && sensitivePosition(field) {
+					if value, ok := item.(string); ok && !secretReference.MatchString(value) {
+						item = "[REDACTED]"
+					}
+				}
 				if sensitivePosition(k) {
 					item = "[REDACTED]"
 				} else {
@@ -515,7 +533,39 @@ func (c *Credentials) sanitizeExchange(result *Exchange, used []localCredential)
 	}
 	result.Headers = h
 	if !result.Binary {
-		result.Body = string(c.SanitizeJSON([]byte(result.Body)))
+		media := strings.ToLower(strings.TrimSpace(strings.Split(result.Headers.Get("Content-Type"), ";")[0]))
+		trimmed := strings.TrimSpace(result.Body)
+		structured := media == "application/json" || strings.HasSuffix(media, "+json") || strings.HasPrefix(trimmed, "{") || strings.HasPrefix(trimmed, "[")
+		if structured && !json.Valid([]byte(result.Body)) {
+			result.Body = ""
+			result.BodyWithheld = true
+		} else if media == "application/x-www-form-urlencoded" {
+			fields, err := url.ParseQuery(result.Body)
+			if err != nil {
+				result.Body = ""
+				result.BodyWithheld = true
+			} else {
+				for name, values := range fields {
+					sensitive := sensitivePosition(name)
+					for _, item := range used {
+						if strings.EqualFold(name, item.Field) {
+							sensitive = true
+						}
+					}
+					if sensitive {
+						fields[name] = []string{"[REDACTED]"}
+					} else {
+						for i, v := range values {
+							values[i] = c.Sanitize(v)
+						}
+						fields[name] = values
+					}
+				}
+				result.Body = fields.Encode()
+			}
+		} else {
+			result.Body = string(c.SanitizeJSON([]byte(result.Body)))
+		}
 		// Redact bound body/query field names in structured responses as well.
 		for _, item := range used {
 			if item.Field != "" {
@@ -527,7 +577,9 @@ func (c *Credentials) sanitizeExchange(result *Exchange, used []localCredential)
 }
 func redactResponseField(body, field string) string {
 	var v any
-	if json.Unmarshal([]byte(body), &v) != nil {
+	decoder := json.NewDecoder(strings.NewReader(body))
+	decoder.UseNumber()
+	if decoder.Decode(&v) != nil {
 		return body
 	}
 	var walk func(any)
