@@ -35,5 +35,5 @@ func requestCommand(o options, in io.Reader) (any, error) {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	defer stop()
-	return project.Send(ctx, root, o.env, d, project.SendOptions{})
+	return project.Send(ctx, root, o.env, d, project.SendOptions{Credentials: o.credentials})
 }

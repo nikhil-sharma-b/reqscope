@@ -10,8 +10,9 @@ Verified on 2026-10-13 using upstream documentation and tagged Go module metadat
 | google/uuid | v1.6.0 | Opaque UUID identities. [Upstream repository](https://github.com/google/uuid) documents UUID generation and parsing. |
 | x/sys | v0.49.0 | OS file locking on Linux/macOS. [Unix API](https://pkg.go.dev/golang.org/x/sys/unix) provides `Flock`. |
 | x/term | v0.47.0 | Terminal detection. [API](https://pkg.go.dev/golang.org/x/term) documents `IsTerminal`. |
+| go-keyring | v0.2.6 | OS credential storage through Linux Secret Service and macOS Keychain. [Upstream repository](https://github.com/zalando/go-keyring) documents the APIs, MIT license and platform dependencies. |
 | x/ansi | v0.11.9 | Width-aware truncation. [Upstream API](https://pkg.go.dev/github.com/charmbracelet/x/ansi) documents `Truncate`. |
 
 Bubble Tea v2.1.0 and the selected x/sys and x/term versions require Go 1.26.0, so that is the application's minimum. No implementation code was copied from jira-tui; its interaction patterns informed the specification. Dependency licenses are retained in upstream modules.
 
-OpenAPI validators, HTTP serialization, SQLite and credential-store dependencies are deferred to the tickets that use them. This ticket performs no OpenAPI or network operations.
+SQLite and full OpenAPI validation remain deferred. Credential tests substitute only the OS store boundary; production uses go-keyring with no file fallback.

@@ -164,7 +164,7 @@ path. Copying a project does not copy its approval. Renaming an environment keep
 its approval if the effective settings are unchanged. Restart restores only a
 nonproduction selection, otherwise a configured nonproduction environment or
 the environment chooser. Protected credential bindings participate in the
-fingerprint; credential configuration belongs to the credentials ticket.
+fingerprint. Credential values and bindings are managed through the TUI.
 
 
 Sending HTTP requests
@@ -211,9 +211,8 @@ body. Undefined variables fail before connecting. `timeoutMs`, `maxRedirects`
 and `maxBodyBytes` configure limits per draft. Defaults are 30 seconds, five
 redirects and 10 MiB of retained response. TLS certificates are verified.
 Timeouts are bounded at one day and retained bodies at 1 GiB. There are no
-automatic retries. Protected credentials are not read or attached, and explicit
-Authorization, Proxy-Authorization and Cookie headers are rejected until the
-credential attachment/redaction ticket is implemented.
+automatic retries. Authorization, Proxy-Authorization and Cookie headers require
+protected credential references. Literal authentication headers are rejected.
 
 In the TUI, select an environment with Space e s. Space r c composes the selected
 endpoint and shows required inputs, descriptions and example suggestions.
@@ -235,3 +234,75 @@ return 2, missing resources 3, access denials 4, transport/TLS/timeout/redirect
 limit failures 5, storage failures 7, and cancellation 130. Ctrl+C cancels a CLI
 request. JSON output uses the existing versioned envelope, with status, timing,
 headers, retained byte count and binary/truncation flags in `data`.
+
+
+Protected credentials
+---------------------
+
+Select the active environment, then use `Space e k` to add or replace a named
+credential. Tab moves between fields and Enter advances or saves. Value entry
+is masked, and stored values cannot be revealed. Basic credentials use
+`username:password`; bearer credentials contain the token alone. Bearer and
+basic credentials attach to Authorization. API keys may bind to an exact header,
+query field or the body. Bindings include the module, exact origin and exact
+URL path. A redirect to a different path requires a different binding and is
+rejected before sending credentials. Fields and paths do not use wildcards.
+
+Use `Space e i` for names and configured state, and `Space e d` to delete a
+credential by name with confirmation. Adding, replacing or deleting a credential
+removes the environment's CLI approval. Use `Space e a` to review and approve
+access again. These actions also appear in help and the command palette.
+
+Credential values use Linux Secret Service over D-Bus or the macOS Keychain.
+If the OS store is unavailable or locked, the TUI explains the failure and offers
+an explicit session-only choice. There is no plaintext fallback and no automatic
+installation or service configuration. Session values disappear when the process
+exits and cannot be used by a separate CLI process. Missing values require TUI
+replacement; ordinary project variables do not become protected credentials.
+
+Request drafts contain opaque references, for example:
+
+```json
+{"module":"api","method":"GET","url":"/items","headers":[{"name":"Authorization","value":"{{secret:login}}"}]}
+```
+
+Header and query values must consist of the reference alone. Body references
+can appear inside a raw or JSON body; JSON values retain correct escaping.
+Use the explicit query list for query credentials. References may pass through
+ordinary environment variables, but the runner still checks the effective
+placement and destination. References cannot be used in destination hosts or
+paths, field names, or control fields. The runner expands them only after
+checking the current grant and protected binding. Absolute URLs, CLI overrides
+and redirects receive the same checks. Cross-origin redirects strip sensitive
+headers and are rejected before contacting an origin outside the grant.
+
+```sh
+bin/reqscope secret list --project ./my-api --env staging --output json
+bin/reqscope secret inspect --project ./my-api --env staging --output json
+bin/reqscope access inspect --project ./my-api --env staging --output json
+```
+
+These commands expose names, configured state and grant status. They cannot
+retrieve or change values, bindings or approvals. An unavailable OS store can
+still be inspected for missing state; other project output fails closed until
+the store is available, so unknown stored values cannot leak through inspection.
+
+Registered values, their JSON/URL representations and basic encoding are
+redacted before runner results, errors, CLI previews, TUI rendering and response
+copying. Response authentication headers and common JSON/XML authentication fields
+are redacted even for unregistered server-generated values. Binary response
+bodies expose metadata only. Invalid or incomplete structured JSON bodies are
+withheld when they cannot be safely sanitized. XML elements and attributes,
+plain authentication assignments and form-encoded authentication fields
+are redacted as well. Arbitrary transformations or encodings performed by
+a server can evade redaction; this is not guaranteed secret detection.
+
+Only ordinary project files and credential reference names belong in Git or
+project exports. Values reside in the OS store, and protected binding metadata
+and approvals reside in the user data directory, keyed by project identity and
+canonical local path. Copying project files does not copy credentials or grants.
+Reqscope's CLI restrictions are an application boundary: processes with shell
+access under the same OS account may access the OS store, edit local approvals
+or inspect process memory. Keep that account and the OS credential service
+protected. Automated tests use a controlled store at the OS boundary; macOS
+cross-builds do not substitute for live Keychain acceptance on a Mac.

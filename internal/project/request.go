@@ -34,6 +34,7 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
+	Credentials  *Credentials
 	Interactive  bool
 	Confirmation string
 }
@@ -55,6 +56,7 @@ type Exchange struct {
 	Body          string      `json:"body"`
 	RetainedBytes int         `json:"retainedBytes"`
 	Binary        bool        `json:"binary"`
+	BodyWithheld  bool        `json:"bodyWithheld,omitempty"`
 	Truncated     bool        `json:"truncated"`
 }
 
@@ -85,6 +87,11 @@ func expandVariables(raw string, vars map[string]string, active map[string]bool,
 		}
 		end += start + 2
 		name := strings.TrimSpace(raw[start+2 : end])
+		if strings.HasPrefix(name, "secret:") {
+			result.WriteString(raw[start : end+2])
+			raw = raw[end+2:]
+			continue
+		}
 		v, ok := vars[name]
 		if !ok {
 			return "", Fail("invalid_input", "undefined variable %q", name)
@@ -123,6 +130,17 @@ func requestAccess(root, env, module, target string, interactive bool) (AccessRe
 	return r, nil
 }
 func PrepareRequest(root, env string, d RequestDraft, interactive bool) (PreparedRequest, error) {
+	return PrepareRequestWithCredentials(root, env, d, interactive, DefaultCredentials)
+}
+func PrepareRequestWithCredentials(root, env string, d RequestDraft, interactive bool, c *Credentials) (PreparedRequest, error) {
+	if err := c.Refresh(root); err != nil {
+		return PreparedRequest{}, err
+	}
+	p, err := prepareRequest(root, env, d, interactive)
+	p.URL = c.Sanitize(p.URL)
+	return p, c.SanitizeError(err)
+}
+func prepareRequest(root, env string, d RequestDraft, interactive bool) (PreparedRequest, error) {
 	var p PreparedRequest
 	if !interactive && strings.TrimSpace(env) == "" {
 		return p, Fail("access_denied", "every CLI network run requires explicit --env")
@@ -188,9 +206,7 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 		if err != nil {
 			return p, err
 		}
-		if strings.EqualFold(f.Name, "Authorization") || strings.EqualFold(f.Name, "Proxy-Authorization") || strings.EqualFold(f.Name, "Cookie") {
-			return p, Fail("invalid_input", "protected credential attachment requires ticket 06")
-		}
+
 		headers.Add(f.Name, v)
 	}
 	paths := map[string]string{}
@@ -208,6 +224,9 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	}
 	for name, v := range paths {
 		raw = strings.ReplaceAll(raw, "{"+name+"}", url.PathEscape(v))
+	}
+	if strings.Contains(raw, "{{secret:") {
+		return p, Fail("access_denied", "secrets are forbidden in destination host/path")
 	}
 	if strings.ContainsAny(raw, "{}") {
 		return p, Fail("invalid_input", "missing path input")
@@ -281,6 +300,9 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 			}
 		}
 	}
+	if err := validateCredentials(root, env, r, req, d); err != nil {
+		return p, err
+	}
 	data, _ := json.Marshal(struct {
 		Draft            RequestDraft
 		URL, Body, Grant string
@@ -299,13 +321,22 @@ func SanitizedDestination(raw string) string {
 	u.Fragment = ""
 	return u.String()
 }
-func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (Exchange, error) {
-	p, err := PrepareRequest(root, env, d, opts.Interactive)
+func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (result Exchange, err error) {
+	c := opts.Credentials
+	if c == nil {
+		c = DefaultCredentials
+	}
+	defer func() { err = c.SanitizeError(err) }()
+	p, err := PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
 	if err != nil {
 		return Exchange{}, err
 	}
 	if opts.Interactive && p.Classification == "production" && opts.Confirmation != p.Fingerprint {
 		return Exchange{}, Fail("access_denied", "production send requires confirmation of the current request")
+	}
+	used, err := c.attach(root, env, p)
+	if err != nil {
+		return Exchange{}, err
 	}
 	timeout := 30 * time.Second
 	if d.TimeoutMS != 0 {
@@ -329,6 +360,21 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		if len(via) > redirects {
 			return Fail("transport_error", "redirect limit exceeded")
 		}
+		from, _ := Origin(via[0].URL.String())
+		to, _ := Origin(req.URL.String())
+		if from != to {
+			for name := range req.Header {
+				sensitive := protectedHeader(name)
+				for _, item := range used {
+					if item.In == "header" && strings.EqualFold(name, item.Field) {
+						sensitive = true
+					}
+				}
+				if sensitive {
+					req.Header.Del(name)
+				}
+			}
+		}
 		current, err := requestAccess(root, env, p.draft.Module, req.URL.String(), opts.Interactive)
 		if err != nil {
 			return err
@@ -336,8 +382,24 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		if current.Fingerprint != p.review.Fingerprint {
 			return Fail("access_denied", "environment changed during execution")
 		}
+		items, err := credentialItems(root, env)
+		if err != nil {
+			return err
+		}
+		for _, item := range used {
+			if err := checkSecretPosition(items, current, credentialPosition{Destination: req.URL.String(), Module: p.draft.Module, In: item.In, Field: item.Field}, "{{secret:"+item.Name+"}}"); err != nil {
+				return err
+			}
+		}
 		return nil
 	}}
+	fresh, err := requestAccess(root, env, p.draft.Module, p.request.URL.String(), opts.Interactive)
+	if err != nil {
+		return Exchange{}, err
+	}
+	if fresh.Fingerprint != p.review.Fingerprint {
+		return Exchange{}, Fail("access_denied", "environment or binding changed during execution")
+	}
 	start := time.Now()
 	response, err := client.Do(p.request.WithContext(ctx))
 	if err != nil {
@@ -348,7 +410,7 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if err != nil {
 		return Exchange{}, transportError(ctx, err)
 	}
-	result := Exchange{Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
+	result = Exchange{Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
 	if int64(len(b)) == capBytes {
 		cancel()
 	}
@@ -357,6 +419,7 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if !result.Binary {
 		result.Body = string(b)
 	}
+	c.sanitizeExchange(&result, used)
 	return result, nil
 }
 func transportError(ctx context.Context, err error) error {
@@ -389,4 +452,22 @@ func validHeaderName(name string) bool {
 func binaryContentType(contentType string) bool {
 	media := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
 	return media != "" && !strings.HasPrefix(media, "text/") && media != "application/json" && !strings.HasSuffix(media, "+json") && media != "application/xml" && !strings.HasSuffix(media, "+xml") && media != "application/javascript" && media != "application/x-www-form-urlencoded"
+}
+
+func ioRequestBody(req *http.Request) (string, error) {
+	if req.GetBody == nil {
+		return "", nil
+	}
+	body, err := req.GetBody()
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+	b, err := io.ReadAll(body)
+	return string(b), err
+}
+func setRequestBody(req *http.Request, body string) {
+	req.Body = io.NopCloser(strings.NewReader(body))
+	req.ContentLength = int64(len(body))
+	req.GetBody = func() (io.ReadCloser, error) { return io.NopCloser(strings.NewReader(body)), nil }
 }

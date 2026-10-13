@@ -64,8 +64,8 @@ func (m *Model) requestAction(action string) (bool, tea.Cmd) {
 			m.status = "Cancelling request"
 		}
 	case "response-copy":
-		if m.exchange.Binary {
-			m.status = "Binary content cannot be copied"
+		if m.exchange.Binary || m.exchange.BodyWithheld {
+			m.status = "Withheld or binary content cannot be copied"
 		} else {
 			m.status = "Copied retained response body"
 			return true, tea.SetClipboard(m.exchange.Body)
@@ -85,7 +85,7 @@ func (m *Model) prepareSend() tea.Cmd {
 		m.status = err.Error()
 		return nil
 	}
-	p, err := project.PrepareRequest(m.root, m.activeEnvironment, d, true)
+	p, err := project.PrepareRequestWithCredentials(m.root, m.activeEnvironment, d, true, m.credentials)
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -105,7 +105,7 @@ func (m *Model) startSend(d project.RequestDraft, confirmation string) tea.Cmd {
 	m.overlay = ""
 	root, env := m.root, m.activeEnvironment
 	return func() tea.Msg {
-		result, err := project.Send(ctx, root, env, d, project.SendOptions{Interactive: true, Confirmation: confirmation})
+		result, err := project.Send(ctx, root, env, d, project.SendOptions{Interactive: true, Confirmation: confirmation, Credentials: m.credentials})
 		return exchangeMsg{result, err}
 	}
 }
@@ -173,7 +173,9 @@ func (m *Model) responseLines() []string {
 	}
 	b, _ := json.Marshal(m.exchange.Headers)
 	lines := []string{fmt.Sprintf("HTTP %d | %d ms | %d retained bytes | binary=%t truncated=%t", m.exchange.Status, m.exchange.DurationMS, m.exchange.RetainedBytes, m.exchange.Binary, m.exchange.Truncated), string(b)}
-	if m.exchange.Binary {
+	if m.exchange.BodyWithheld {
+		lines = append(lines, "Body withheld: structured authentication data could not be safely sanitized")
+	} else if m.exchange.Binary {
 		lines = append(lines, "Binary body: text search and copy unavailable")
 	} else {
 		lines = append(lines, strings.Split(m.exchange.Body, "\n")...)
