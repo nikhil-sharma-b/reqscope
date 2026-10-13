@@ -34,6 +34,10 @@ func defaults() []Binding {
 		{"method-filter", "Cycle endpoint method filter", []string{"<leader> s m"}}, {"tag-group", "Toggle endpoint tag grouping", []string{"<leader> s t"}},
 		{"search", "Search focused pane", []string{"/"}}, {"endpoint-search", "Search endpoints", []string{"<leader> /"}}, {"next-match", "Next match", []string{"n"}}, {"previous-match", "Previous match", []string{"N"}},
 		{"open", "Open selection or edit project name", []string{"enter"}}, {"help", "Effective keybindings", []string{"?"}}, {"palette", "Command palette", []string{"<leader> :", ":"}}, {"quit", "Quit", []string{"q", "ctrl+c"}},
+		{"environment-create", "Create environment", []string{"<leader> e c"}},
+		{"environment-edit", "Edit environment and variables", []string{"<leader> e e"}},
+		{"environment-select", "Select active environment", []string{"<leader> e s"}},
+		{"environment-authorize", "Authorize CLI destinations", []string{"<leader> e a"}},
 	}
 }
 func Bindings(c KeyConfig) ([]Binding, error) {

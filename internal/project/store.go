@@ -225,6 +225,9 @@ func recoverTransaction(root string) error {
 	return syncDir(root)
 }
 func commit(root string, changes []Change, preview bool) error {
+	return commitProtected(root, changes, preview, false)
+}
+func commitProtected(root string, changes []Change, preview, confirmLower bool) error {
 	if err := validateChanges(changes); err != nil {
 		return err
 	}
@@ -262,6 +265,19 @@ func commit(root string, changes []Change, preview bool) error {
 				if old.ID != next.ID {
 					return Fail("invalid_input", "environment ID is immutable")
 				}
+				if next.Classification != "production" && !confirmLower {
+					s, err := load(root)
+					if err != nil {
+						return err
+					}
+					a, _, err := readAccess(root, s)
+					if err != nil {
+						return err
+					}
+					if old.Classification == "production" || a.Production[old.ID] {
+						return Fail("access_denied", "lowering production classification requires TUI confirmation")
+					}
+				}
 			}
 		}
 	}
@@ -275,7 +291,14 @@ func commit(root string, changes []Change, preview bool) error {
 	if err = atomicWrite(filepath.Join(root, journalName), b); err != nil {
 		return err
 	}
-	return recoverTransaction(root)
+	if err := recoverTransaction(root); err != nil {
+		return err
+	}
+	if !confirmLower {
+		_, err := load(root)
+		return err
+	}
+	return nil
 }
 
 // Apply validates and commits a batch under one project lock. Empty expected revisions create resources.
@@ -326,6 +349,9 @@ func Init(root, name string, preview bool) (Snapshot, error) {
 		}
 		return commit(root, changes, false)
 	})
+	if err == nil {
+		err = locked(root, func() error { return reconcileAccess(root, &s) })
+	}
 	return s, err
 }
 func Load(root string) (Snapshot, error) {
@@ -388,5 +414,8 @@ func load(root string) (Snapshot, error) {
 		}
 		return a.ID < b.ID
 	})
+	if err := reconcileAccess(root, &s); err != nil {
+		return s, err
+	}
 	return s, nil
 }
