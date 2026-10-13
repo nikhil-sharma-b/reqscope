@@ -17,15 +17,31 @@ import (
 	"unicode/utf8"
 )
 
-var panes = []string{"Project", "Environments", "Endpoints", "Request", "Response", "History"}
+type paneID int
+
+const (
+	projectPane paneID = iota
+	environmentsPane
+	endpointsPane
+	requestPane
+	responsePane
+	historyPane
+	casesPane
+	scenariosPane
+)
+
+var panes = []string{"Project", "Environments", "Endpoints", "Request", "Response", "History", "Cases", "Scenarios"}
+var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
+	paletteQuery                          string
 	nextAction                            string
 	nextCount                             int
 	root                                  string
 	snapshot                              project.Snapshot
 	bindings                              []Binding
-	width, height, pane, index            int
+	width, height, index                  int
+	pane                                  paneID
 	zoom                                  bool
 	mode, pending, count, overlay, status string
 	draft, query                          string
@@ -227,7 +243,7 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				return m.action(b.Action, 1)
 			}
 		default:
-			m.query = edit(m.query, msg)
+			m.paletteQuery = edit(m.paletteQuery, msg)
 			m.paletteIndex = 0
 		}
 		return m, nil
@@ -304,14 +320,20 @@ func edit(s string, msg tea.KeyPressMsg) string {
 	return s
 }
 func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
-	if m.dirty && m.pane == 0 {
+	if m.dirty && m.pane == projectPane {
 		switch action {
-		case "pane-left", "pane-right", "environments", "endpoints", "request", "response", "history":
+		case "pane-left", "pane-right", "environments", "endpoints", "request", "response", "history", "cases", "scenarios", "endpoint-search":
 			m.overlay = "confirm-leave"
 			m.nextAction = action
 			m.nextCount = n
 			return m, nil
 		}
+	}
+	if pane, ok := actionPanes[action]; ok {
+		m.pane = pane
+		m.index = 0
+		m.query = ""
+		return m, nil
 	}
 	switch action {
 	case "quit":
@@ -333,33 +355,16 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	case "half-up":
 		m.index = max(0, m.index-n*max(1, m.height/2))
 	case "pane-left":
-		m.pane = (m.pane + len(panes) - 1) % len(panes)
+		m.pane = (m.pane + paneID(len(panes)) - 1) % paneID(len(panes))
 		m.index = 0
 	case "pane-right":
-		m.pane = (m.pane + 1) % len(panes)
+		m.pane = (m.pane + 1) % paneID(len(panes))
 		m.index = 0
 	case "zoom":
 		m.zoom = !m.zoom
-	case "project":
-		m.pane = 0
-		m.index = 0
-	case "environments":
-		m.pane = 1
-		m.index = 0
-	case "endpoints":
-		m.pane = 2
-		m.index = 0
-	case "request":
-		m.pane = 3
-		m.index = 0
-	case "response":
-		m.pane = 4
-		m.index = 0
-	case "history":
-		m.pane = 5
-		m.index = 0
 	case "rename":
-		m.pane = 0
+		m.query = ""
+		m.pane = projectPane
 		m.mode = "INSERT"
 	case "save":
 		m.save()
@@ -376,6 +381,11 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Project validation passed"
 		}
+	case "endpoint-search":
+		m.pane = endpointsPane
+		m.mode = "SEARCH"
+		m.query = ""
+		m.index = 0
 	case "search":
 		m.mode = "SEARCH"
 		m.query = ""
@@ -391,9 +401,9 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 			m.index = (m.index - n%len(items) + len(items)) % len(items)
 		}
 	case "open":
-		if m.pane == 0 {
+		if m.pane == projectPane {
 			m.mode = "INSERT"
-		} else if m.pane == 1 {
+		} else if m.pane == environmentsPane {
 			items := m.environmentItems()
 			if len(items) > 0 {
 				e := items[min(m.index, len(items)-1)]
@@ -410,7 +420,7 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	case "palette":
 		m.overlay = "palette"
 		m.mode = "INSERT"
-		m.query = ""
+		m.paletteQuery = ""
 		m.paletteIndex = 0
 	case "discard":
 		m.dirty = false
@@ -458,15 +468,21 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
-	if m.pane == 1 {
+	if m.pane == environmentsPane {
 		var items []string
 		for _, e := range m.environmentItems() {
 			items = append(items, e.Name+" | "+e.Classification)
 		}
 		return items
 	}
-	if m.pane == 0 {
-		return []string{"Name: " + m.draft, "ID: " + m.snapshot.Manifest.ID, "Format: 1", "Revision: " + m.snapshot.Revision}
+	if m.pane == projectPane {
+		var result []string
+		for _, line := range []string{"Name: " + m.draft, "ID: " + m.snapshot.Manifest.ID, "Format: 1", "Revision: " + m.snapshot.Revision} {
+			if strings.Contains(strings.ToLower(line), strings.ToLower(m.query)) {
+				result = append(result, line)
+			}
+		}
+		return result
 	}
 	return nil
 }
@@ -475,7 +491,7 @@ func (m *Model) paletteActions() []Binding {
 	actions = append(actions, Binding{Action: "discard", Description: "Discard name edits and reload"})
 	var result []Binding
 	for _, b := range actions {
-		if strings.Contains(strings.ToLower(b.Description), strings.ToLower(m.query)) {
+		if strings.Contains(strings.ToLower(b.Description), strings.ToLower(m.paletteQuery)) {
 			result = append(result, b)
 		}
 	}
@@ -494,16 +510,28 @@ func fit(s string, width, height int) string {
 	}
 	return strings.Join(lines, "\n")
 }
-func (m *Model) paneView(pane, width, height int) string {
+func (m *Model) paneView(pane paneID, width, height int) string {
 	title := panes[pane]
 	if pane == m.pane {
 		title = "> " + title
 	}
 	var body string
 	switch pane {
-	case 0:
-		body = "Name: " + m.draft + "\nID: " + m.snapshot.Manifest.ID + "\nFormat: 1\nRevision: " + m.snapshot.Revision + "\n\n" + m.root
-	case 1:
+	case projectPane:
+		items := m.items()
+		if len(items) == 0 {
+			body = "No matching project fields"
+		}
+		start := max(0, m.index-max(1, height-2)+1)
+		for i := start; i < len(items); i++ {
+			mark := "  "
+			if i == m.index {
+				mark = "> "
+			}
+			body += mark + items[i] + "\n"
+		}
+		body += "\n" + m.root
+	case environmentsPane:
 		items := m.environmentItems()
 		if len(items) == 0 {
 			body = "No matching environments"
@@ -517,14 +545,18 @@ func (m *Model) paneView(pane, width, height int) string {
 			body += mark + items[i].Name + " | " + items[i].Classification + "\n"
 		}
 		body += "\nNo CLI grants configured"
-	case 2:
+	case endpointsPane:
 		body = "No specifications imported"
-	case 3:
+	case requestPane:
 		body = "No request selected"
-	case 4:
+	case responsePane:
 		body = "No response recorded"
-	case 5:
+	case historyPane:
 		body = "No runs recorded"
+	case casesPane:
+		body = "No cases saved"
+	case scenariosPane:
+		body = "No scenarios saved"
 	}
 	return fit(title+"\n"+body, max(1, width), max(1, height))
 }
@@ -542,17 +574,17 @@ func (m *Model) View() tea.View {
 	} else {
 		left := width / 3
 		right := width - left - 3
-		other := 3
-		if m.pane != 2 {
+		other := requestPane
+		if m.pane != endpointsPane {
 			other = m.pane
 		}
 		rightView := m.paneView(other, right, contentHeight)
-		if m.pane == 2 || m.pane == 3 || m.pane == 4 {
+		if m.pane == endpointsPane || m.pane == requestPane || m.pane == responsePane {
 			top := max(1, contentHeight/2)
 			bottom := max(1, contentHeight-top)
-			rightView = m.paneView(3, right, top) + "\n" + m.paneView(4, right, bottom)
+			rightView = m.paneView(requestPane, right, top) + "\n" + m.paneView(responsePane, right, bottom)
 		}
-		content = lipgloss.JoinHorizontal(lipgloss.Top, m.paneView(2, left, contentHeight), " | ", rightView)
+		content = lipgloss.JoinHorizontal(lipgloss.Top, m.paneView(endpointsPane, left, contentHeight), " | ", rightView)
 	}
 	footer := m.status
 	if m.mode == "SEARCH" {
@@ -575,7 +607,7 @@ func (m *Model) View() tea.View {
 		start := min(m.paletteIndex, max(0, len(lines)-1))
 		overlay = "Effective bindings | Esc close\n" + strings.Join(lines[start:], "\n")
 	case "palette":
-		overlay = "Command palette: " + m.query + "\n"
+		overlay = "Command palette: " + m.paletteQuery + "\n"
 		actions := m.paletteActions()
 		if len(actions) == 0 {
 			overlay += "No matching commands"

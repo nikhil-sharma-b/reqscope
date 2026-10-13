@@ -66,3 +66,36 @@ func TestDirtyQuitCancelAndSave(t *testing.T) {
 		t.Fatalf("save did not persist draft: %v %+v", err, s)
 	}
 }
+func TestFocusedProjectSearchAndLeaderGroups(t *testing.T) {
+	root := t.TempDir()
+	project.Init(root, "Demo", false)
+	m, _ := tui.New(root, tui.KeyConfig{})
+	key(m, "/")
+	for _, k := range []string{"D", "e", "m", "o"} {
+		key(m, k)
+	}
+	view := m.View().Content
+	if !strings.Contains(view, "> Name: Demo") || strings.Contains(view, "ID:") {
+		t.Fatalf("project search did not filter rows: %s", view)
+	}
+	key(m, "esc")
+	key(m, "/")
+	key(m, "z")
+	if !strings.Contains(m.View().Content, "No matching project fields") {
+		t.Fatal("missing empty search result")
+	}
+	key(m, "esc")
+	for _, group := range []string{"r", "e", "c", "s", "h", "p"} {
+		key(m, "space")
+		if !strings.Contains(m.View().Content, group+"  More commands") {
+			t.Fatalf("missing leader group %s", group)
+		}
+		key(m, "esc")
+	}
+	for _, k := range []string{"space", "/"} {
+		key(m, k)
+	}
+	if !strings.Contains(m.View().Content, "> Endpoints") {
+		t.Fatal("leader search did not focus endpoints")
+	}
+}

@@ -6,6 +6,7 @@ import (
 	"os"
 	"sort"
 	"strings"
+	"unicode"
 	"unicode/utf8"
 )
 
@@ -25,10 +26,11 @@ func defaults() []Binding {
 		{"first", "First item", []string{"g g"}}, {"last", "Last item", []string{"G"}},
 		{"half-down", "Half page down", []string{"ctrl+d"}}, {"half-up", "Half page up", []string{"ctrl+u"}},
 		{"pane-left", "Previous pane", []string{"ctrl+w h", "ctrl+w k"}}, {"pane-right", "Next pane", []string{"ctrl+w l", "ctrl+w j", "tab"}}, {"zoom", "Zoom focused pane", []string{"ctrl+w o"}},
-		{"endpoints", "Endpoints pane", []string{"g e"}}, {"request", "Request pane", []string{"g q"}}, {"response", "Response pane", []string{"g r"}}, {"history", "History pane", []string{"g h"}},
+		{"endpoints", "Endpoints pane", []string{"g e"}}, {"request", "Request pane", []string{"g q", "<leader> r i"}}, {"response", "Response pane", []string{"g r", "<leader> r r"}}, {"history", "History pane", []string{"g h", "<leader> h l"}},
 		{"project", "Inspect project", []string{"<leader> p i"}}, {"validate", "Validate project", []string{"<leader> p v"}}, {"rename", "Edit project name", []string{"<leader> p n", "i"}}, {"save", "Save project name", []string{"<leader> p s"}}, {"reload", "Reload project", []string{"<leader> p r"}},
 		{"environments", "Environment templates", []string{"<leader> e l"}},
-		{"search", "Search focused pane", []string{"/", "<leader> /"}}, {"next-match", "Next match", []string{"n"}}, {"previous-match", "Previous match", []string{"N"}},
+		{"cases", "Cases pane", []string{"<leader> c l"}}, {"scenarios", "Scenarios pane", []string{"<leader> s l"}},
+		{"search", "Search focused pane", []string{"/"}}, {"endpoint-search", "Search endpoints", []string{"<leader> /"}}, {"next-match", "Next match", []string{"n"}}, {"previous-match", "Previous match", []string{"N"}},
 		{"open", "Open selection or edit project name", []string{"enter"}}, {"help", "Effective keybindings", []string{"?"}}, {"palette", "Command palette", []string{"<leader> :", ":"}}, {"quit", "Quit", []string{"q", "ctrl+c"}},
 	}
 }
@@ -42,6 +44,12 @@ func Bindings(c KeyConfig) ([]Binding, error) {
 	}
 	if utf8.RuneCountInString(leader) != 1 && leader != "space" {
 		return nil, project.Fail("invalid_input", "leader must be one printable key or space")
+	}
+	if leader != "space" {
+		r, _ := utf8.DecodeRuneInString(leader)
+		if !unicode.IsPrint(r) || unicode.IsSpace(r) {
+			return nil, project.Fail("invalid_input", "leader must be printable")
+		}
 	}
 	reserved := map[string]bool{"esc": true, "enter": true, "tab": true, "backspace": true}
 	if reserved[leader] || leader[0] >= '0' && leader[0] <= '9' {
@@ -94,7 +102,8 @@ func Bindings(c KeyConfig) ([]Binding, error) {
 }
 func validKey(s string) bool {
 	if utf8.RuneCountInString(s) == 1 {
-		return true
+		r, _ := utf8.DecodeRuneInString(s)
+		return unicode.IsPrint(r) && !unicode.IsSpace(r)
 	}
 	switch s {
 	case "space", "enter", "tab", "backspace", "up", "down", "left", "right", "ctrl+c", "ctrl+d", "ctrl+u", "ctrl+w":

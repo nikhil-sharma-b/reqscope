@@ -71,7 +71,7 @@ Future execution precedence follows the specification: unsuccessful scenarios us
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint, request, response and history panes show empty states until their features arrive.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint, request, response, case, scenario and history panes show empty states until their features arrive.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
@@ -79,7 +79,7 @@ The project pane supports editing and saving the project name. Environment templ
 - `/` searches the focused pane; `n`/`N` advances filtered matches.
 - `i` or Enter edits the project name. Esc leaves insert mode and retains edits.
 - `Space p i/v/n/s/r` inspects, validates, renames, saves or reloads the project.
-- `Space e l` opens environment templates.
+- `Space e l` opens environment templates. `Space r i/r` opens request/response panes; `Space c l`, `Space s l` and `Space h l` open cases, scenarios and history. `Space /` opens endpoint search.
 - `?` shows help; `:` or `Space :` opens the command palette. Arrow keys select palette commands; Enter runs one.
 - `q` quits. Leaving a dirty project or quitting asks for save, discard or cancel.
 

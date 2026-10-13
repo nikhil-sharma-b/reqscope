@@ -62,6 +62,17 @@ func safePath(root, relative string) error {
 	return nil
 }
 func locked(root string, fn func() error) error {
+	info, err := os.Stat(root)
+	if errors.Is(err, os.ErrNotExist) {
+		return Fail("not_found", "project directory %s does not exist; initialize it or choose an existing --project", root)
+	}
+	if err != nil {
+		return err
+	}
+	if !info.IsDir() {
+		return Fail("invalid_input", "--project must select a directory or reqscope.yaml")
+	}
+
 	if err := safePath(root, ".reqscope.lock"); err != nil {
 		return err
 	}

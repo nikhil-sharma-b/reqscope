@@ -42,3 +42,11 @@ func TestInvalidInputsKeepJSONEnvelope(t *testing.T) {
 		}
 	}
 }
+func TestMissingExplicitProjectIsNotFound(t *testing.T) {
+	var out, diag bytes.Buffer
+	root := t.TempDir() + "/missing"
+	code := cli.Run([]string{"project", "inspect", "--project", root, "--output", "json"}, strings.NewReader(""), &out, &diag)
+	if code != 3 || !strings.Contains(out.String(), `"code":"not_found"`) {
+		t.Fatalf("missing project: %d %s %s", code, &out, &diag)
+	}
+}
