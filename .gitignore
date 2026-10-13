@@ -1,0 +1,4 @@
+/bin/
+.reqscope.lock
+.reqscope-transaction.json
+.reqscope-write-*
