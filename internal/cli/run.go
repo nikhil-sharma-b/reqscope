@@ -20,7 +20,7 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   project init [NAME] [--input FILE|-] [--preview]
   project inspect|validate
   project update --input FILE|- [--preview]
-  spec import --input FILE [--preview]
+  spec import (--input FILE | --url URL) [--select NAME_OR_URL] [--env ENV --module MODULE --input AUTH_FILE] [--preview]
   spec inspect [SOURCE_ID]
   endpoint list [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag]
   endpoint search [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag] [--limit N] [--offset N]
@@ -40,7 +40,7 @@ No arguments opens the TUI only when stdin and stdout are terminals.
 
 type options struct {
 	credentials                                *project.Credentials
-	env, module, url                           string
+	env, module, url, selection                string
 	project, output, input, keys               string
 	query, method, tag, groupBy, limit, offset string
 	preview                                    bool
@@ -88,6 +88,8 @@ func parse(args []string) (options, error) {
 				o.env = value
 			case "--module":
 				o.module = value
+			case "--select":
+				o.selection = value
 			case "--url":
 				o.url = value
 			case "--project":
