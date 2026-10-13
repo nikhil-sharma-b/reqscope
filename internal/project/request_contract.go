@@ -3,6 +3,7 @@ package project
 import (
 	"encoding/json"
 	"fmt"
+	"math"
 	"net/http"
 	"net/url"
 	"sort"
@@ -130,6 +131,18 @@ func serializeContract(ep Endpoint, path map[string]string, query url.Values, he
 		if kind == "object" {
 			return Fail("invalid_input", "object parameter serialization is unsupported")
 		}
+		if kind == "array" && in == "path" && len(values) == 1 {
+			separator := ","
+			switch p["collectionFormat"] {
+			case "ssv":
+				separator = " "
+			case "pipes":
+				separator = "|"
+			case "tsv":
+				separator = "\t"
+			}
+			values = strings.Split(values[0], separator)
+		}
 		itemSchema := schema
 		if kind == "array" {
 			itemSchema = object(schema["items"])
@@ -191,7 +204,7 @@ func validateScalar(v string, schema map[string]any) error {
 			return fmt.Errorf("expected integer")
 		}
 	case "number":
-		if _, err := strconv.ParseFloat(v, 64); err != nil {
+		if n, err := strconv.ParseFloat(v, 64); err != nil || math.IsInf(n, 0) || math.IsNaN(n) {
 			return fmt.Errorf("expected number")
 		}
 	case "boolean":

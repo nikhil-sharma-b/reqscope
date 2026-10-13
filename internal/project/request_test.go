@@ -211,3 +211,168 @@ paths:
 		t.Fatal(received)
 	}
 }
+
+func TestDraftDestinationsAndProductionConfirmationCannotBypassPolicy(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; io.WriteString(w, "ok") }))
+	defer server.Close()
+	denied := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { t.Error("unauthorized server contacted") }))
+	defer denied.Close()
+	root := requestWorkspace(t, server.URL)
+	for _, d := range []project.RequestDraft{{Module: "api", Method: "GET", URL: denied.URL}, {Module: "api", Method: "GET", URL: "http://{{host}}/"}} {
+		if _, err := project.Send(context.Background(), root, "staging", d, project.SendOptions{}); err == nil {
+			t.Fatal("destination override accepted")
+		}
+	}
+	d := project.RequestDraft{Module: "api", Method: "GET", URL: "/"}
+	if _, err := project.Send(context.Background(), root, "", d, project.SendOptions{}); err == nil {
+		t.Fatal("implicit env accepted")
+	}
+	s, _ := project.Load(root)
+	e, _ := s.Resolve("staging")
+	e.Variables["host"] = strings.TrimPrefix(denied.URL, "http://")
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	if _, err := project.Send(context.Background(), root, "staging", project.RequestDraft{Module: "api", Method: "GET", URL: "http://{{host}}/"}, project.SendOptions{}); err == nil {
+		t.Fatal("interpolated host bypass")
+	}
+	e, _ = s.Resolve("production")
+	e.BaseURLs["api"] = server.URL
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	p, err := project.PrepareRequest(root, "production", d, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err = project.Send(context.Background(), root, "production", d, project.SendOptions{Interactive: true}); err == nil {
+		t.Fatal("unconfirmed production send")
+	}
+	changed := d
+	changed.URL = "/edited"
+	if _, err = project.Send(context.Background(), root, "production", changed, project.SendOptions{Interactive: true, Confirmation: p.Fingerprint}); err == nil {
+		t.Fatal("stale confirmation accepted")
+	}
+	if calls != 0 {
+		t.Fatalf("invalid requests contacted server %d times", calls)
+	}
+	if _, err = project.Send(context.Background(), root, "production", d, project.SendOptions{Interactive: true, Confirmation: p.Fingerprint}); err != nil || calls != 1 {
+		t.Fatalf("confirmed send %v calls %d", err, calls)
+	}
+	// A changed effective destination invalidates the old CLI grant.
+	s, _ = project.Load(root)
+	e, _ = s.Resolve("staging")
+	e.BaseURLs["api"] = denied.URL
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	if _, err = project.Send(context.Background(), root, "staging", d, project.SendOptions{}); err == nil {
+		t.Fatal("stale CLI grant accepted")
+	}
+}
+
+func TestRepeatedVariablesAreNotMistakenForCycles(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { b, _ := io.ReadAll(r.Body); received = string(b) }))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	s, _ := project.Load(root)
+	e, _ := s.Resolve("staging")
+	e.Variables["value"] = "expanded"
+	e.Variables["nested"] = "{{value}}"
+	e.Variables["cycle"] = "{{cycle}}"
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	d := project.RequestDraft{Module: "api", Method: "POST", URL: "/", BodyType: "raw", Body: strings.Repeat("{{nested}}", 40)}
+	if _, err := project.Send(context.Background(), root, "staging", d, project.SendOptions{Interactive: true}); err != nil || received != strings.Repeat("expanded", 40) {
+		t.Fatalf("%q %v", received, err)
+	}
+	d.Body = "{{cycle}}"
+	if _, err := project.Send(context.Background(), root, "staging", d, project.SendOptions{Interactive: true}); err == nil {
+		t.Fatal("cycle accepted")
+	}
+}
+
+func TestURLQueryValidationAndOptionalJSONBody(t *testing.T) {
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Query().Get("count") != "3" {
+			t.Error(r.URL.String())
+		}
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	os.WriteFile(file, []byte(`openapi: 3.0.3
+info: {title: Items, version: '1'}
+paths:
+  /items:
+    post:
+      parameters:
+        - {name: count, in: query, required: true, schema: {type: integer}}
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema: {type: object}
+      responses: {'200': {description: OK}}
+`), 0600)
+	spec, err := project.ImportSpecification(root, file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := project.Load(root)
+	e, _ := s.Resolve("staging")
+	e.BaseURLs[spec.ModuleID] = server.URL
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	d, _, err := project.ContractDraft(root, spec.Endpoints[0].ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	d.URL = "/items?count=bad"
+	if _, err = project.Send(context.Background(), root, "staging", d, project.SendOptions{Interactive: true}); err == nil || calls != 0 {
+		t.Fatalf("invalid query contacted server %v %d", err, calls)
+	}
+	d.URL = "/items?count=3"
+	if _, err = project.Send(context.Background(), root, "staging", d, project.SendOptions{Interactive: true}); err != nil || calls != 1 {
+		t.Fatalf("optional body/query %v %d", err, calls)
+	}
+}
+
+func TestBodyReadStopsAtCapWithoutWaitingForAnotherByte(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		io.WriteString(w, "abcd")
+		w.(http.Flusher).Flush()
+		<-r.Context().Done()
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	result, err := project.Send(context.Background(), root, "staging", project.RequestDraft{Module: "api", Method: "GET", URL: "/", MaxBodyBytes: 4, TimeoutMS: 100}, project.SendOptions{})
+	if err != nil || result.Body != "abcd" || !result.Truncated {
+		t.Fatalf("cap must stop read: %+v %v", result, err)
+	}
+}
+func TestSerializedIntegerPathArray(t *testing.T) {
+	var received string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { received = r.URL.EscapedPath() }))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	os.WriteFile(file, []byte(`openapi: 3.0.3
+info: {title: Items, version: '1'}
+paths:
+  /items/{ids}:
+    get:
+      parameters:
+        - {name: ids, in: path, required: true, schema: {type: array, items: {type: integer}}}
+      responses: {'200': {description: OK}}
+`), 0600)
+	spec, err := project.ImportSpecification(root, file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, _ := project.Load(root)
+	e, _ := s.Resolve("staging")
+	e.BaseURLs[spec.ModuleID] = server.URL
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	d, _, _ := project.ContractDraft(root, spec.Endpoints[0].ID)
+	d.Path["ids"] = "1,2"
+	if _, err = project.Send(context.Background(), root, "staging", d, project.SendOptions{Interactive: true}); err != nil || received != "/items/1%2C2" {
+		t.Fatalf("%q %v", received, err)
+	}
+}

@@ -59,14 +59,26 @@ type Exchange struct {
 }
 
 func interpolate(raw string, vars map[string]string) (string, error) {
-	for n := 0; n < 32; n++ {
+	return expandVariables(raw, vars, map[string]bool{}, 0)
+}
+func expandVariables(raw string, vars map[string]string, active map[string]bool, depth int) (string, error) {
+	if depth > 32 {
+		return "", Fail("invalid_input", "variable nesting limit exceeded")
+	}
+	var result strings.Builder
+	for {
 		start := strings.Index(raw, "{{")
 		if start < 0 {
 			if strings.Contains(raw, "}}") {
 				return "", Fail("invalid_input", "invalid variable syntax")
 			}
-			return raw, nil
+			result.WriteString(raw)
+			return result.String(), nil
 		}
+		if strings.Contains(raw[:start], "}}") {
+			return "", Fail("invalid_input", "invalid variable syntax")
+		}
+		result.WriteString(raw[:start])
 		end := strings.Index(raw[start+2:], "}}")
 		if end < 0 {
 			return "", Fail("invalid_input", "invalid variable syntax")
@@ -77,9 +89,21 @@ func interpolate(raw string, vars map[string]string) (string, error) {
 		if !ok {
 			return "", Fail("invalid_input", "undefined variable %q", name)
 		}
-		raw = raw[:start] + v + raw[end+2:]
+		if active[name] {
+			return "", Fail("invalid_input", "cyclic variables")
+		}
+		active[name] = true
+		expanded, err := expandVariables(v, vars, active, depth+1)
+		delete(active, name)
+		if err != nil {
+			return "", err
+		}
+		result.WriteString(expanded)
+		if result.Len() > 10*1024*1024 {
+			return "", Fail("invalid_input", "expanded input exceeds 10 MiB")
+		}
+		raw = raw[end+2:]
 	}
-	return "", Fail("invalid_input", "cyclic variables")
 }
 func requestAccess(root, env, module, target string, interactive bool) (AccessReview, error) {
 	if !interactive {
@@ -142,7 +166,15 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if err != nil {
 		return p, err
 	}
-	query := url.Values{}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return p, Fail("invalid_input", "invalid destination")
+	}
+	query, err := url.ParseQuery(parsed.RawQuery)
+	if err != nil {
+		return p, Fail("invalid_input", "invalid query encoding")
+	}
+
 	headers := http.Header{}
 	for _, f := range d.Query {
 		v, err := interpolate(f.Value, e.Variables)
@@ -194,13 +226,7 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 			return p, Fail("invalid_input", "invalid destination")
 		}
 	}
-	for name, values := range query {
-		for _, v := range values {
-			q := u.Query()
-			q.Add(name, v)
-			u.RawQuery = q.Encode()
-		}
-	}
+	u.RawQuery = query.Encode()
 	r, err = requestAccess(root, env, d.Module, u.String(), interactive)
 	if err != nil {
 		return p, err
@@ -212,7 +238,7 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if d.BodyType != "" && d.BodyType != "json" && d.BodyType != "raw" {
 		return p, Fail("invalid_input", "supported body types are json and raw")
 	}
-	if d.BodyType == "json" {
+	if d.BodyType == "json" && body != "" {
 		if !json.Valid([]byte(body)) {
 			return p, Fail("invalid_input", "invalid JSON body")
 		}
@@ -242,14 +268,16 @@ func PrepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if d.ContentType != "" {
 		req.Header.Set("Content-Type", d.ContentType)
 	}
-	// Validate headers before opening a connection, including custom repeated fields.
+	// Validate headers before opening a connection, including repeated fields.
 	for name, values := range req.Header {
-		if name == "" || strings.ContainsAny(name, " ()<>@,;:\\\"/[]?={}\t\r\n") {
+		if !validHeaderName(name) {
 			return p, Fail("invalid_input", "invalid header name")
 		}
 		for _, v := range values {
-			if strings.ContainsAny(v, "\r\n\x00") {
-				return p, Fail("invalid_input", "invalid header value")
+			for i := 0; i < len(v); i++ {
+				if v[i] < 32 && v[i] != '\t' || v[i] == 127 {
+					return p, Fail("invalid_input", "invalid header value")
+				}
 			}
 		}
 	}
@@ -316,16 +344,16 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		return Exchange{}, transportError(ctx, err)
 	}
 	defer response.Body.Close()
-	b, err := io.ReadAll(io.LimitReader(response.Body, capBytes+1))
+	b, err := io.ReadAll(io.LimitReader(response.Body, capBytes))
 	if err != nil {
 		return Exchange{}, transportError(ctx, err)
 	}
-	result := Exchange{Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) > capBytes}
-	if result.Truncated {
-		b = b[:capBytes]
+	result := Exchange{Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
+	if int64(len(b)) == capBytes {
+		cancel()
 	}
 	result.RetainedBytes = len(b)
-	result.Binary = !utf8.Valid(b) || strings.ContainsRune(string(b), 0)
+	result.Binary = !utf8.Valid(b) || strings.ContainsRune(string(b), 0) || binaryContentType(response.Header.Get("Content-Type"))
 	if !result.Binary {
 		result.Body = string(b)
 	}
@@ -343,4 +371,22 @@ func transportError(ctx context.Context, err error) error {
 		return Fail("transport_error", "request timed out")
 	}
 	return Fail("transport_error", "HTTP transport failed")
+}
+
+func validHeaderName(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i := 0; i < len(name); i++ {
+		c := name[i]
+		if c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || strings.ContainsRune("!#$%&'*+-.^_`|~", rune(c)) {
+			continue
+		}
+		return false
+	}
+	return true
+}
+func binaryContentType(contentType string) bool {
+	media := strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	return media != "" && !strings.HasPrefix(media, "text/") && media != "application/json" && !strings.HasSuffix(media, "+json") && media != "application/xml" && !strings.HasSuffix(media, "+xml") && media != "application/javascript" && media != "application/x-www-form-urlencoded"
 }

@@ -79,17 +79,17 @@ JSON stdout contains exactly one envelope with `schemaVersion`, `success`, `data
 | 0 | Success |
 | 2 | Usage, input or schema validation |
 | 3 | Missing or ambiguous resource, or revision conflict |
-| 4 | Access or credential denial, reserved for access operations |
-| 5 | Transport failure, reserved for execution |
+| 4 | Access or credential denial |
+| 5 | Transport failure |
 | 6 | Failed assertion/validation or unsuccessful scenario, reserved for execution |
 | 7 | Storage or internal failure |
 | 130 | Cancellation |
 
-Future execution precedence follows the specification: unsuccessful scenarios use 6 with per-step causes, ad hoc transport failures use 5, and pre-execution access denial uses 4. Project validation does not authorize execution.
+Execution precedence follows the specification: unsuccessful scenarios use 6 with per-step causes, ad hoc transport failures use 5, and pre-execution access denial uses 4. Project validation does not authorize execution.
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request, response, case, scenario and history panes show empty states until their features arrive.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case, scenario and history panes show empty states until their features arrive.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.

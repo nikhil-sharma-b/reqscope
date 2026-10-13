@@ -40,6 +40,9 @@ func schema(name string) (map[string]any, error) {
 			props[name] = map[string]any{"type": "integer", "minimum": 0}
 		}
 		required = []string{}
+		props["timeoutMs"].(map[string]any)["maximum"] = 86400000
+		props["maxBodyBytes"].(map[string]any)["maximum"] = 1073741824
+		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw"}
 	case "project.init":
 	case "project.update":
 		props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
@@ -57,7 +60,11 @@ func schema(name string) (map[string]any, error) {
 	default:
 		return nil, project.Fail("not_found", "unknown input schema %q; use input-schema list", name)
 	}
-	return map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "title": name, "type": "object", "additionalProperties": false, "properties": props, "required": required}, nil
+	result := map[string]any{"$schema": "https://json-schema.org/draft/2020-12/schema", "title": name, "type": "object", "additionalProperties": false, "properties": props, "required": required}
+	if name == "request.send" {
+		result["anyOf"] = []any{map[string]any{"required": []string{"endpointId"}}, map[string]any{"required": []string{"module", "method", "url"}}}
+	}
+	return result, nil
 }
 func validateInput(name string, b []byte) (any, error) {
 	shape, err := schema(name)
@@ -72,7 +79,7 @@ func validateInput(name string, b []byte) (any, error) {
 		if d.EndpointID == "" && (d.Module == "" || d.Method == "" || d.URL == "") {
 			return nil, project.Fail("invalid_input", "provide endpointId or module, method and url")
 		}
-		if d.TimeoutMS < 0 || d.MaxBodyBytes < 0 || d.MaxRedirects != nil && *d.MaxRedirects < 0 {
+		if d.TimeoutMS < 0 || d.TimeoutMS > 86400000 || d.MaxBodyBytes < 0 || d.MaxBodyBytes > 1073741824 || d.MaxRedirects != nil && *d.MaxRedirects < 0 {
 			return nil, project.Fail("invalid_input", "invalid request limits")
 		}
 		if d.BodyType != "" && d.BodyType != "json" && d.BodyType != "raw" {

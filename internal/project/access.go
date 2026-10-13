@@ -155,28 +155,12 @@ func Origin(raw string) (string, error) {
 	return u.Scheme + "://" + net.JoinHostPort(strings.ToLower(u.Hostname()), port), nil
 }
 func resolveURL(raw string, vars map[string]string) (string, error) {
-	for n := 0; n < 32; n++ {
-		start := strings.Index(raw, "{{")
-		if start < 0 {
-			if strings.Contains(raw, "}}") {
-				return "", Fail("invalid_input", "invalid destination variable")
-			}
-			_, err := Origin(raw)
-			return raw, err
-		}
-		end := strings.Index(raw[start+2:], "}}")
-		if end < 0 {
-			return "", Fail("invalid_input", "invalid destination variable")
-		}
-		end += start + 2
-		name := strings.TrimSpace(raw[start+2 : end])
-		v, ok := vars[name]
-		if !ok {
-			return "", Fail("invalid_input", "undefined destination variable %q", name)
-		}
-		raw = raw[:start] + v + raw[end+2:]
+	resolved, err := interpolate(raw, vars)
+	if err != nil {
+		return "", err
 	}
-	return "", Fail("invalid_input", "cyclic destination variables")
+	_, err = Origin(resolved)
+	return resolved, err
 }
 func resolvedReview(e Environment, bindings map[string]string) (AccessReview, error) {
 	r := AccessReview{EnvironmentID: e.ID, Classification: e.Classification, BaseURLs: map[string]string{}, Origins: map[string]string{}, Bindings: bindings}
