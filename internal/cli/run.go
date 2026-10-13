@@ -22,7 +22,9 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   project update --input FILE|- [--preview]
   spec import --input FILE [--preview]
   spec inspect [SOURCE_ID]
-  endpoint list|get ID
+  endpoint list [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag]
+  endpoint search [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag] [--limit N] [--offset N]
+  endpoint get ID
   schema list|get ID
   environment list|get ID_OR_NAME
   environment create|update --input FILE|- [--preview]
@@ -33,9 +35,10 @@ No arguments opens the TUI only when stdin and stdout are terminals.
 `
 
 type options struct {
-	project, output, input, keys string
-	preview                      bool
-	args                         []string
+	project, output, input, keys               string
+	query, method, tag, groupBy, limit, offset string
+	preview                                    bool
+	args                                       []string
 }
 
 func parse(args []string) (options, error) {
@@ -76,6 +79,18 @@ func parse(args []string) (options, error) {
 				o.output = value
 			case "--input":
 				o.input = value
+			case "--query":
+				o.query = value
+			case "--method":
+				o.method = value
+			case "--tag":
+				o.tag = value
+			case "--group-by":
+				o.groupBy = value
+			case "--limit":
+				o.limit = value
+			case "--offset":
+				o.offset = value
 			case "--keys":
 				o.keys = value
 			default:
