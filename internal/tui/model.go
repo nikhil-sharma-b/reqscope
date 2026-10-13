@@ -4,6 +4,7 @@ package tui
 import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
+	"context"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
@@ -35,6 +36,11 @@ var panes = []string{"Project", "Environments", "Endpoints", "Request", "Respons
 var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
+	requestText       string
+	requestFields     []project.GuidedField
+	prepared          project.PreparedRequest
+	requestCancel     context.CancelFunc
+	exchange          project.Exchange
 	activeEnvironment string
 	environmentDraft  project.Resource
 	environmentText   string
@@ -146,6 +152,21 @@ func (m *Model) poll() tea.Cmd {
 func (m *Model) Init() tea.Cmd { return m.poll() }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case exchangeMsg:
+		if m.requestCancel != nil {
+			m.requestCancel()
+			m.requestCancel = nil
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
+			m.exchange = msg.result
+			m.pane = responsePane
+			m.query = ""
+			m.index = 0
+			m.status = "HTTP exchange completed"
+		}
+		return m, nil
 	case refreshMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
@@ -171,6 +192,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.requestKey(msg); handled {
+		return m, cmd
+	}
 	key := msg.String()
 	if key == " " {
 		key = "space"
@@ -414,6 +438,9 @@ func edit(s string, msg tea.KeyPressMsg) string {
 	return s
 }
 func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.requestAction(action); handled {
+		return m, cmd
+	}
 	if m.environmentAction(action) {
 		return m, nil
 	}
@@ -604,6 +631,9 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
+	if m.pane == responsePane {
+		return m.responseLines()
+	}
 	if m.pane == endpointsPane || m.pane == schemasPane {
 		labels, _ := m.contractItems()
 		return labels
@@ -711,9 +741,17 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 			}
 		}
 	case requestPane:
-		body = "No request selected"
+		body = m.requestText
+		if m.overlay == "request-confirm" {
+			body = "Review the sanitized destination in the confirmation"
+		}
+		if body == "" {
+			body = "No request selected | request new or compose"
+		}
 	case responsePane:
-		body = "No response recorded"
+		lines := m.responseLines()
+		start := min(m.index, max(0, len(lines)-1))
+		body = strings.Join(lines[start:], "\n")
 	case historyPane:
 		body = "No runs recorded"
 	case casesPane:
@@ -763,6 +801,9 @@ func (m *Model) View() tea.View {
 	}
 	base := fit(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches", width, height)
 	overlay := m.environmentOverlay()
+	if requestOverlay := m.requestOverlay(); requestOverlay != "" {
+		overlay = requestOverlay
+	}
 	switch m.overlay {
 	case "import":
 		overlay = "Import local specification\nPath: " + m.importPath + "\nEnter preview | Esc cancel\n" + m.status
