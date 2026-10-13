@@ -39,6 +39,10 @@ type Model struct {
 	importPath    string
 	importPreview project.Specification
 	detail        string
+	endpointQuery string
+	methodFilter  string
+	groupTags     bool
+	globalSearch  bool
 
 	paletteQuery                          string
 	nextAction                            string
@@ -338,7 +342,11 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.mode = "NORMAL"
 			return m, nil
 		}
-		m.query = edit(m.query, msg)
+		if m.globalSearch {
+			m.endpointQuery = edit(m.endpointQuery, msg)
+		} else {
+			m.query = edit(m.query, msg)
+		}
 		m.index = 0
 		return m, nil
 	}
@@ -439,9 +447,11 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	case "half-up":
 		m.index = max(0, m.index-n*max(1, m.height/2))
 	case "pane-left":
+		m.query = ""
 		m.pane = (m.pane + paneID(len(panes)) - 1) % paneID(len(panes))
 		m.index = 0
 	case "pane-right":
+		m.query = ""
 		m.pane = (m.pane + 1) % paneID(len(panes))
 		m.index = 0
 	case "zoom":
@@ -465,12 +475,28 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 		} else {
 			m.status = "Project validation passed"
 		}
+	case "method-filter":
+		methods := []string{"", "GET", "POST", "PUT", "PATCH", "DELETE", "HEAD", "OPTIONS", "TRACE"}
+		for i, method := range methods {
+			if method == m.methodFilter {
+				m.methodFilter = methods[(i+1)%len(methods)]
+				break
+			}
+		}
+		m.index = 0
+		m.status = "Method: " + m.methodFilter
+	case "tag-group":
+		m.groupTags = !m.groupTags
+		m.index = 0
 	case "endpoint-search":
+		m.globalSearch = true
+		m.endpointQuery = ""
 		m.pane = endpointsPane
 		m.mode = "SEARCH"
 		m.query = ""
 		m.index = 0
 	case "search":
+		m.globalSearch = false
 		m.mode = "SEARCH"
 		m.query = ""
 		m.index = 0
@@ -613,6 +639,14 @@ func fit(s string, width, height int) string {
 }
 func (m *Model) paneView(pane paneID, width, height int) string {
 	title := panes[pane]
+	if pane == endpointsPane {
+		if m.methodFilter != "" {
+			title += " " + m.methodFilter
+		}
+		if m.groupTags {
+			title += " by tag"
+		}
+	}
 	if pane == m.pane {
 		title = "> " + title
 	}
@@ -651,13 +685,17 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		if len(labels) == 0 {
 			body = "No matching imported resources"
 		}
-		start := max(0, m.index-max(1, height-2)+1)
+		start := min(m.index, max(0, len(labels)-1))
 		for i := start; i < len(labels); i++ {
 			mark := "  "
 			if i == m.index {
 				mark = "> "
 			}
-			body += mark + labels[i] + "\n"
+			if i == m.index && pane == endpointsPane {
+				body += ansi.Wrap(mark+labels[i], max(1, width), "") + "\n"
+			} else {
+				body += mark + labels[i] + "\n"
+			}
 		}
 	case requestPane:
 		body = "No request selected"
@@ -701,6 +739,9 @@ func (m *Model) View() tea.View {
 	footer := m.status
 	if m.mode == "SEARCH" {
 		footer = "/" + m.query
+		if m.globalSearch {
+			footer = "Endpoints /" + m.endpointQuery
+		}
 	}
 	if m.pending != "" {
 		footer = m.pending
@@ -774,17 +815,43 @@ func (m *Model) contractItems() ([]string, []string) {
 					details = append(details, text)
 				}
 			}
-		} else {
-			for _, e := range s.Endpoints {
-				b, _ := yaml.Marshal(e)
-				text := string(b) + "Source: " + s.Location + "\n" + strings.Join(s.Diagnostics, "\n")
-				if strings.Contains(strings.ToLower(text), strings.ToLower(m.query)) {
-					labels = append(labels, e.Method+" "+e.Path)
-					details = append(details, text)
-				}
-			}
+
 		}
 	}
+	if m.pane != schemasPane {
+		focusedQuery := ""
+		if m.pane == endpointsPane {
+			focusedQuery = m.query
+		}
+		query := m.endpointQuery
+		allowed := map[string]bool{}
+		if focusedQuery != "" {
+			query = focusedQuery
+			for _, match := range project.SearchEndpoints(m.specs, project.EndpointQuery{Query: m.endpointQuery}) {
+				allowed[match.ID] = true
+			}
+		}
+		for _, match := range project.SearchEndpoints(m.specs, project.EndpointQuery{Query: query, Method: m.methodFilter, GroupByTag: m.groupTags}) {
+			if focusedQuery != "" && !allowed[match.ID] {
+				continue
+			}
+			b, _ := yaml.Marshal(match.Endpoint)
+			text := string(b) + "Source: " + match.Source + "\n"
+			for _, source := range m.specs {
+				if source.ID == match.SourceID {
+					text += strings.Join(source.Diagnostics, "\n")
+					break
+				}
+			}
+			label := match.Method + " " + match.Path + " | " + match.Summary + " | " + match.Source + " | module " + match.ModuleID
+			if match.Group != "" {
+				label = "[" + match.Group + "] " + label
+			}
+			labels = append(labels, label)
+			details = append(details, text)
+		}
+	}
+
 	return labels, details
 }
 func (m *Model) contractDetails() []string { _, details := m.contractItems(); return details }

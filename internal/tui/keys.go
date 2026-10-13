@@ -31,6 +31,7 @@ func defaults() []Binding {
 		{"project", "Inspect project", []string{"<leader> p i"}}, {"validate", "Validate project", []string{"<leader> p v"}}, {"rename", "Edit project name", []string{"<leader> p n", "i"}}, {"save", "Save project name", []string{"<leader> p s"}}, {"reload", "Reload project", []string{"<leader> p r"}},
 		{"environments", "Environment templates", []string{"<leader> e l"}},
 		{"cases", "Cases pane", []string{"<leader> c l"}}, {"scenarios", "Scenarios pane", []string{"<leader> s l"}},
+		{"method-filter", "Cycle endpoint method filter", []string{"<leader> s m"}}, {"tag-group", "Toggle endpoint tag grouping", []string{"<leader> s t"}},
 		{"search", "Search focused pane", []string{"/"}}, {"endpoint-search", "Search endpoints", []string{"<leader> /"}}, {"next-match", "Next match", []string{"n"}}, {"previous-match", "Previous match", []string{"N"}},
 		{"open", "Open selection or edit project name", []string{"enter"}}, {"help", "Effective keybindings", []string{"?"}}, {"palette", "Command palette", []string{"<leader> :", ":"}}, {"quit", "Quit", []string{"q", "ctrl+c"}},
 	}

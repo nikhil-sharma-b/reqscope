@@ -124,3 +124,14 @@ make test
 ```
 
 Tests cover real temporary projects, revision races, interrupted transactions, public CLI processes, structured input, nonterminal invocation, and TUI events/rendering. See [dependency notes](docs/dependencies.md) for version choices.
+
+Endpoint search uses case-insensitive substring and fuzzy subsequence matching across paths, operation IDs, summaries, descriptions and tags. Path matches rank first; ties use path, method and immutable source/module/endpoint IDs. `endpoint list` accepts the same query and filters.
+
+```sh
+bin/reqscope endpoint search --project ./my-api --query pets --method GET --limit 20 --output json
+bin/reqscope endpoint search --project ./my-api --tag pets --group-by tag --offset 20 --limit 20 --output json
+```
+
+Search returns `items`, `total`, `empty` and `nextOffset`. Pass a non-null `nextOffset` as the next `--offset`, keeping the query and filters unchanged. The default page size is 100, with a maximum of 1000. Pagination describes the current workspace; imports between pages may change results. Grouping includes an operation in each distinct tag group while retaining its endpoint ID.
+
+In the TUI, `Space /` searches all endpoints as you type. `/` filters the focused pane and retains the global endpoint query. `Space s m` cycles the method filter; `Space s t` toggles tag grouping. `n` and `N` navigate matches, and Enter opens the selected contract with source and module context. These actions also appear in `?` help and the command palette. Narrow terminals show one focused pane; pane switches and selection work as in the full layout.

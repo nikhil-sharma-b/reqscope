@@ -1,6 +1,10 @@
 package cli
 
-import "github.com/nikhil-sharma-b/reqscope/internal/project"
+import (
+	"github.com/nikhil-sharma-b/reqscope/internal/project"
+	"strconv"
+	"strings"
+)
 
 func specificationCommand(o options) (any, error) {
 	root, err := rootPath(o)
@@ -8,6 +12,9 @@ func specificationCommand(o options) (any, error) {
 		return nil, err
 	}
 	group, action := o.args[0], o.args[1]
+	if group == "endpoint" && (action == "search" || action == "list") {
+		return endpointSearch(root, o, action == "search")
+	}
 	if group == "spec" && action == "import" {
 		if len(o.args) != 2 || o.input == "" || o.input == "-" {
 			return nil, project.Fail("invalid_input", "spec import requires --input FILE; stdin cannot establish an approved reference root")
@@ -60,4 +67,47 @@ func specificationCommand(o options) (any, error) {
 		return schemas, nil
 	}
 	return nil, project.Fail("not_found", "resource not found; list resources to select an ID")
+}
+
+func endpointSearch(root string, o options, paged bool) (any, error) {
+	if len(o.args) != 2 {
+		return nil, project.Fail("invalid_input", "endpoint search/list takes no positional arguments")
+	}
+	if o.groupBy != "" && o.groupBy != "tag" {
+		return nil, project.Fail("invalid_input", "--group-by must be tag")
+	}
+	method := strings.ToUpper(o.method)
+	if method != "" && !strings.Contains("|GET|POST|PUT|PATCH|DELETE|HEAD|OPTIONS|TRACE|", "|"+method+"|") {
+		return nil, project.Fail("invalid_input", "unknown HTTP method")
+	}
+	limit, offset := 100, 0
+	for _, arg := range []struct {
+		raw              string
+		target           *int
+		minimum, maximum int
+	}{{o.limit, &limit, 1, 1000}, {o.offset, &offset, 0, int(^uint(0) >> 1)}} {
+		if arg.raw != "" {
+			n, err := strconv.Atoi(arg.raw)
+			if err != nil || n < arg.minimum || n > arg.maximum {
+				return nil, project.Fail("invalid_input", "invalid pagination value")
+			}
+			*arg.target = n
+		}
+	}
+	specs, err := project.Specifications(root)
+	if err != nil {
+		return nil, err
+	}
+	matches := project.SearchEndpoints(specs, project.EndpointQuery{Query: o.query, Method: method, Tag: o.tag, GroupByTag: o.groupBy == "tag"})
+	if !paged && o.query == "" && o.method == "" && o.tag == "" && o.groupBy == "" && o.limit == "" && o.offset == "" {
+		return matches, nil
+	}
+	start := min(offset, len(matches))
+	end := start + min(limit, len(matches)-start)
+	var next *int
+	if end < len(matches) {
+		n := end
+		next = &n
+	}
+	return map[string]any{"items": matches[start:end], "total": len(matches), "nextOffset": next, "empty": len(matches) == 0}, nil
 }
