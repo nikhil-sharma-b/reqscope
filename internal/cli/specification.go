@@ -2,6 +2,7 @@ package cli
 
 import (
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
+	"os"
 	"strconv"
 	"strings"
 )
@@ -16,6 +17,47 @@ func specificationCommand(o options) (any, error) {
 		return endpointSearch(root, o, action == "search")
 	}
 	if group == "spec" && action == "import" {
+		if o.url != "" {
+			if len(o.args) != 2 {
+				return nil, project.Fail("invalid_input", "unexpected positional arguments")
+			}
+			opts := project.SourceImportOptions{Environment: o.env, Module: o.module, Credentials: o.credentials}
+			if o.input != "" {
+				b, err := os.ReadFile(o.input)
+				if err != nil {
+					return nil, project.Fail("invalid_input", "cannot read import authentication file")
+				}
+				var auth struct {
+					Headers []project.RequestField `json:"headers" yaml:"headers"`
+					Query   []project.RequestField `json:"query" yaml:"query"`
+				}
+				if err := project.Decode(b, &auth); err != nil {
+					return nil, project.Fail("invalid_input", "invalid import authentication file")
+				}
+				opts.Headers, opts.Query = auth.Headers, auth.Query
+			}
+			discovery, err := project.DiscoverSource(root, o.url, opts)
+			if err != nil {
+				return discovery, err
+			}
+			if len(discovery.Candidates) == 0 {
+				return discovery, project.Fail("invalid_input", "%s", discovery.Hint)
+			}
+			var selected *project.SourceCandidate
+			for i := range discovery.Candidates {
+				c := &discovery.Candidates[i]
+				if (o.selection == "" && len(discovery.Candidates) == 1) || o.selection == c.Name || o.selection == c.Location {
+					if selected != nil {
+						return discovery, project.Fail("ambiguous_resource", "selection matches several specifications; use the raw URL")
+					}
+					selected = c
+				}
+			}
+			if selected == nil {
+				return discovery, project.Fail("invalid_input", "choose a candidate with --select NAME_OR_URL, or supply its raw --url")
+			}
+			return project.ImportSource(root, *selected, o.preview, "", opts)
+		}
 		if len(o.args) != 2 || o.input == "" || o.input == "-" {
 			return nil, project.Fail("invalid_input", "spec import requires --input FILE; stdin cannot establish an approved reference root")
 		}

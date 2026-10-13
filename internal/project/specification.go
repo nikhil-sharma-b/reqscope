@@ -55,6 +55,7 @@ type resolver struct {
 	parsed    map[string]any
 	bytes     int
 	nodes     int
+	fetch     func(string) ([]byte, error)
 }
 
 func (r *resolver) read(name string) (any, error) {
@@ -63,6 +64,27 @@ func (r *resolver) read(name string) (any, error) {
 	}
 	if len(r.documents) >= 64 {
 		return nil, Fail("invalid_input", "reference file limit of 64 exceeded")
+	}
+	if r.fetch != nil {
+		b, err := r.fetch(name)
+		if err != nil {
+			return nil, err
+		}
+		r.bytes += len(b)
+		if r.bytes > 10*1024*1024 {
+			return nil, Fail("invalid_input", "import exceeds 10 MiB")
+		}
+		var v any
+		if err = Decode(b, &v); err != nil {
+			return nil, Fail("invalid_input", "invalid remote contract document")
+		}
+		v, err = normalizeYAML(v)
+		if err != nil {
+			return nil, Fail("invalid_input", "invalid remote contract document")
+		}
+		r.documents[name] = b
+		r.parsed[name] = v
+		return v, nil
 	}
 	rel, err := filepath.Rel(r.root, name)
 	if err != nil || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) {
@@ -110,11 +132,16 @@ func (r *resolver) resolve(v any, file string, stack map[string]bool, depth int)
 				return nil, Fail("invalid_input", "$ref must be a string in %s", file)
 			}
 			u, err := url.Parse(ref)
-			if err != nil || u.Scheme != "" || u.Host != "" || u.RawQuery != "" {
+			if err != nil || (r.fetch == nil && (u.Scheme != "" || u.Host != "" || u.RawQuery != "")) {
 				return nil, Fail("invalid_input", "remote or invalid reference %q is not fetched; supply a local reference", ref)
 			}
 			target := file
-			if u.Path != "" {
+			if r.fetch != nil {
+				base, _ := url.Parse(file)
+				location := base.ResolveReference(u)
+				location.Fragment = ""
+				target = location.String()
+			} else if u.Path != "" {
 				target = filepath.Clean(filepath.Join(filepath.Dir(file), filepath.FromSlash(u.Path)))
 			}
 			identity := target + "#" + u.Fragment
@@ -236,6 +263,11 @@ func importSpecification(root, filename string, preview bool, expectedDigest str
 	if err != nil {
 		return s, err
 	}
+	return importResolvedSpecification(root, abs, "local", &r, v, preview, expectedDigest)
+}
+
+func importResolvedSpecification(root, abs, mode string, r *resolver, v any, preview bool, expectedDigest string) (Specification, error) {
+	var s Specification
 	doc := object(v)
 	if doc == nil {
 		return s, Fail("invalid_input", "contract must be an object")
@@ -265,7 +297,7 @@ func importSpecification(root, filename string, preview bool, expectedDigest str
 	if err := validateContractFields(base, "contract"); err != nil {
 		return s, err
 	}
-	s = Specification{ID: uuid.NewString(), ModuleID: uuid.NewString(), Mode: "local", Location: abs, Version: version, Documents: r.documents, Base: base, Endpoints: []Endpoint{}, Schemas: []Schema{}, Diagnostics: []string{}, Complete: false}
+	s = Specification{ID: uuid.NewString(), ModuleID: uuid.NewString(), Mode: mode, Location: abs, Version: version, Documents: r.documents, Base: base, Endpoints: []Endpoint{}, Schemas: []Schema{}, Diagnostics: []string{}, Complete: false}
 	// Import inspection does not perform response validation.
 	s.Diagnostics = append(s.Diagnostics, "Contract inspection only; response schema validation is not implemented")
 	context := map[string]any{}
@@ -411,7 +443,7 @@ func specifications(root string) ([]Specification, error) {
 	return result, nil
 }
 func validateSpecification(s Specification) error {
-	if !validID(s.ID) || !validID(s.ModuleID) || s.Mode != "local" || s.Base == nil || len(s.Documents) == 0 || len(s.Digest) != 64 {
+	if !validID(s.ID) || !validID(s.ModuleID) || (s.Mode != "local" && s.Mode != "url") || s.Base == nil || len(s.Documents) == 0 || len(s.Digest) != 64 {
 		return Fail("invalid_input", "invalid specification resource")
 	}
 	return nil

@@ -51,6 +51,8 @@ type Model struct {
 	specs             []project.Specification
 	importPath        string
 	importPreview     project.Specification
+	sourceCandidate   project.SourceCandidate
+	sourceDiscovery   project.SourceDiscovery
 	detail            string
 	endpointQuery     string
 	methodFilter      string
@@ -241,6 +243,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.environmentUpdate(msg) {
 		return m, nil
 	}
+	if m.sourceImportKey(msg) {
+		return m, nil
+	}
 	if m.overlay == "import" {
 		if key == "esc" {
 			m.overlay = ""
@@ -248,6 +253,14 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key == "enter" {
+			if strings.HasPrefix(m.importPath, "http://") || strings.HasPrefix(m.importPath, "https://") {
+				if _, err := project.Origin(m.importPath); err != nil {
+					m.status = err.Error()
+					return m, nil
+				}
+				m.overlay = "source-approve"
+				return m, nil
+			}
 			preview, err := project.ImportSpecification(m.root, m.importPath, true)
 			if err != nil {
 				m.status = err.Error()
@@ -267,7 +280,13 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 		if key == "enter" {
-			next, err := project.ImportSpecification(m.root, m.importPath, true)
+			var next project.Specification
+			var err error
+			if m.importPreview.Mode == "url" {
+				next, err = project.ImportSource(m.root, m.sourceCandidate, true, "", m.sourceOptions())
+			} else {
+				next, err = project.ImportSpecification(m.root, m.importPath, true)
+			}
 			if err != nil {
 				m.status = err.Error()
 				return m, nil
@@ -277,7 +296,11 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 				m.status = "File changed; review updated preview"
 				return m, nil
 			}
-			_, err = project.ImportReviewedSpecification(m.root, m.importPath, m.importPreview.Digest)
+			if m.importPreview.Mode == "url" {
+				_, err = project.ImportSource(m.root, m.sourceCandidate, false, m.importPreview.Digest, m.sourceOptions())
+			} else {
+				_, err = project.ImportReviewedSpecification(m.root, m.importPath, m.importPreview.Digest)
+			}
 			if err != nil {
 				m.status = err.Error()
 				return m, nil
@@ -823,9 +846,12 @@ func (m *Model) View() tea.View {
 	if requestOverlay := m.requestOverlay(); requestOverlay != "" {
 		overlay = requestOverlay
 	}
+	if sourceOverlay := m.sourceImportOverlay(); sourceOverlay != "" {
+		overlay = sourceOverlay
+	}
 	switch m.overlay {
 	case "import":
-		overlay = "Import local specification\nPath: " + m.importPath + "\nEnter preview | Esc cancel\n" + m.status
+		overlay = "Import specification file or Swagger/raw URL\nSource: " + m.importPath + "\nEnter preview | Esc cancel\n" + m.status
 	case "import-confirm":
 		overlay = fmt.Sprintf("Import preview\n%s\n%d endpoints, %d schemas\n%s\nEnter apply | Esc cancel\n%s", m.importPath, len(m.importPreview.Endpoints), len(m.importPreview.Schemas), strings.Join(m.importPreview.Diagnostics, "\n"), m.status)
 	case "detail":
@@ -868,7 +894,7 @@ func (m *Model) View() tea.View {
 	if overlay != "" {
 		overlay = m.credentials.Sanitize(overlay)
 		ow := max(1, min(width, 64))
-		if strings.HasPrefix(m.overlay, "environment-") || strings.HasPrefix(m.overlay, "credential-") {
+		if strings.HasPrefix(m.overlay, "environment-") || strings.HasPrefix(m.overlay, "credential-") || strings.HasPrefix(m.overlay, "source-") || strings.HasPrefix(m.overlay, "import") {
 			ow = width
 			overlay = ansi.Wrap(overlay, max(1, ow-4), "")
 		}

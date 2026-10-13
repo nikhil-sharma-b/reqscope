@@ -1,6 +1,6 @@
 # Reqscope
 
-Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. It initializes and reopens projects, imports local Swagger/OpenAPI specifications, and inspects endpoints and schemas. Sending HTTP requests, credentials and history are covered by later tickets.
+Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. It initializes and reopens projects, imports local and remote Swagger/OpenAPI specifications, discovers Swagger UI sources, inspects endpoints and schemas, and sends HTTP requests with protected credentials. History is covered by a later ticket.
 
 Requires Go 1.26 or newer. Linux and macOS are the supported targets.
 
@@ -51,6 +51,58 @@ Preview resolves references and checks the supported structure without persistin
 
 Inspection includes inherited path parameters, operation inputs/responses, descriptions, tags and server/security context. `diagnostics` reports unsupported constructs; `complete` remains false because response schema validation is not implemented. A successful import means the contract can be inspected, not that its response constraints were fully validated.
 
+## Swagger UI and raw URL imports
+
+Open `Space s i`, paste a Swagger UI or raw JSON/YAML URL, and press Enter.
+Review the source origin, then press Enter to approve fetching. If discovery
+finds several specifications, use j/k and Enter to choose one. Review the
+contract preview and press Enter to apply it. Esc cancels without importing.
+Approval stays in the local user data directory for this project and origin.
+It is not copied with project files.
+
+```sh
+bin/reqscope spec import --url https://api.example.com/docs/ --select Pets --project ./my-api --preview --output json
+bin/reqscope spec import --url https://api.example.com/openapi.yaml --project ./my-api --output json
+```
+
+CLI URL imports, including previews, require an existing source-origin approval
+or an applicable approved environment/module destination supplied through
+`--env` and `--module`. Project validation and inspection never fetch URLs.
+The TUI approves only the entered origin. If an initializer, contract or remote
+reference uses another origin, approve that origin through the import form and
+retry the original URL. Discovery errors include visited resources and any
+candidates found so far. If configuration depends on executing JavaScript,
+supply the raw specification URL instead.
+
+Discovery reads static `url`, `urls`, `spec` and `configUrl` declarations in
+pages, referenced scripts and configuration resources. Relative URLs resolve
+against their containing resource. JavaScript is never executed. The standard
+Swagger UI runtime bundles are skipped. Discovery is limited to eight resource
+levels, 64 fetched resources and 10 MiB per operation. Contract references
+retain the existing 64-level and 100,000-value limits. Redirects report the
+sanitized final destination and require its raw URL explicitly. Missing
+resources, denied origins, cycles and oversized documents reject the import.
+
+Source URLs must omit user info, fragments and authentication query parameters.
+Ordinary query parameters such as `version=v1` remain in source locations and
+refresh metadata. Authentication uses protected bindings.
+Configure protected credentials for each exact resource URL, using the existing
+environment credential form. Select that environment in the TUI before import,
+or provide `--env ENV --module MODULE` in the CLI. Matching header/query bindings
+are used automatically. Authenticated CLI fetches also require current
+environment access approval. An optional `--input FILE` with `--url` supplies
+explicit `headers` and `query` lists containing opaque credential references:
+
+```yaml
+headers:
+  - name: Authorization
+    value: '{{secret:swagger-token}}'
+```
+
+Import responses containing registered credential values are rejected before
+storage. Successful imports preserve the original documents, source location,
+resolved base and digest through the same atomic contract import path as files.
+
 ## CLI authoring
 
 ```sh
@@ -97,7 +149,7 @@ The project pane supports editing and saving the project name. Environment templ
 - `/` searches the focused pane; `n`/`N` advances filtered matches.
 - `i` or Enter edits the project name. Esc leaves insert mode and retains edits.
 - `Space p i/v/n/s/r` inspects, validates, renames, saves or reloads the project.
-- `Space s i` opens local import. Enter previews, a second Enter applies, and Esc cancels. `Space s s` opens schemas.
+- `Space s i` opens file or URL import. Enter previews, a second Enter applies, and Esc cancels. `Space s s` opens schemas.
 - `Space e l` opens environment templates. `Space r i/r` opens request/response panes; `Space c l`, `Space s l` and `Space h l` open cases, scenarios and history. `Space /` opens endpoint search.
 - `?` shows help; `:` or `Space :` opens the command palette. Arrow keys select palette commands; Enter runs one.
 - `q` quits. Leaving a dirty project or quitting asks for save, discard or cancel.

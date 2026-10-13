@@ -23,11 +23,12 @@ type AccessReview struct {
 	Fingerprint    string            `json:"fingerprint"`
 }
 type localAccess struct {
-	Credentials map[string]map[string]localCredential `json:"credentials,omitempty"`
-	Production  map[string]bool                       `json:"production"`
-	Grants      map[string]AccessReview               `json:"grants"`
-	Bindings    map[string]map[string]string          `json:"bindings"`
-	Selected    string                                `json:"selected"`
+	SourceOrigins map[string]bool                       `json:"sourceOrigins,omitempty"`
+	Credentials   map[string]map[string]localCredential `json:"credentials,omitempty"`
+	Production    map[string]bool                       `json:"production"`
+	Grants        map[string]AccessReview               `json:"grants"`
+	Bindings      map[string]map[string]string          `json:"bindings"`
+	Selected      string                                `json:"selected"`
 }
 
 func localPath(root, id string) (string, error) {
