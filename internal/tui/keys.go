@@ -45,6 +45,9 @@ func defaults() []Binding {
 		{"environment-edit", "Edit environment and variables", []string{"<leader> e e"}},
 		{"environment-select", "Select active environment", []string{"<leader> e s"}},
 		{"environment-authorize", "Authorize CLI destinations", []string{"<leader> e a"}},
+		{"credential-edit", "Add or replace protected credential", []string{"<leader> e k"}},
+		{"credential-delete", "Delete protected credential", []string{"<leader> e d"}},
+		{"credential-inspect", "Inspect credential names and state", []string{"<leader> e i"}},
 	}
 }
 func Bindings(c KeyConfig) ([]Binding, error) {

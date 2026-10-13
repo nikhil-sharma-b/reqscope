@@ -27,6 +27,8 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint get ID
   schema list|get ID
   request send --env ID_OR_NAME --input FILE|- [--module MODULE] [--url URL] [--method METHOD]
+  secret list|inspect --env ID_OR_NAME
+  access inspect --env ID_OR_NAME
   environment list|get ID_OR_NAME
   environment check-access --env ID_OR_NAME --module MODULE [--url URL]
   environment create|update --input FILE|- [--preview]
@@ -37,6 +39,7 @@ No arguments opens the TUI only when stdin and stdout are terminals.
 `
 
 type options struct {
+	credentials                                *project.Credentials
 	env, module, url                           string
 	project, output, input, keys               string
 	query, method, tag, groupBy, limit, offset string
@@ -48,6 +51,11 @@ func parse(args []string) (options, error) {
 	var o options
 	// Preserve JSON error envelopes even if parsing fails before --output.
 	for i, a := range args {
+		if strings.HasPrefix(a, "--project=") {
+			o.project = strings.TrimPrefix(a, "--project=")
+		} else if a == "--project" && i+1 < len(args) {
+			o.project = args[i+1]
+		}
 		if a == "--output=json" || a == "--output" && i+1 < len(args) && args[i+1] == "json" {
 			o.output = "json"
 		}
@@ -131,7 +139,7 @@ func exitCode(err error) int {
 			return 2
 		case "not_found", "revision_conflict", "ambiguous_resource":
 			return 3
-		case "access_denied":
+		case "access_denied", "credential_unavailable":
 			return 4
 		case "transport_error":
 			return 5
@@ -149,7 +157,20 @@ func terminal(r io.Reader, w io.Writer) bool {
 
 // Run never prompts unless an interactive TUI was selected with terminal streams.
 func Run(args []string, in io.Reader, out, diag io.Writer) int {
+	return RunWithCredentials(args, in, out, diag, project.DefaultCredentials)
+}
+
+func RunWithCredentials(args []string, in io.Reader, out, diag io.Writer, credentials *project.Credentials) int {
 	o, err := parse(args)
+	o.credentials = credentials
+	if root, e := rootPath(o); e == nil {
+		if refreshErr := credentials.Refresh(root); refreshErr != nil {
+			var pe *project.Error
+			if errors.As(refreshErr, &pe) && pe.Code == "access_denied" && !(len(o.args) > 0 && (o.args[0] == "secret" || o.args[0] == "access")) {
+				return emit(o, nil, refreshErr, out, diag)
+			}
+		}
+	}
 	if err != nil {
 		return emit(o, nil, err, out, diag)
 	}
@@ -198,15 +219,20 @@ func emit(o options, data any, err error, out, diag io.Writer) int {
 		if !errors.As(err, &e) {
 			e = &project.Error{Code: "storage_error", Message: err.Error()}
 		}
+		e = &project.Error{Code: e.Code, Message: o.credentials.Sanitize(e.Message)}
 		fmt.Fprintln(diag, e.Message)
 	}
 	if o.output == "json" {
-		if encErr := json.NewEncoder(out).Encode(envelope{1, err == nil, data, []string{}, e}); encErr != nil {
+		b, _ := json.Marshal(envelope{1, err == nil, data, []string{}, e})
+		if _, encErr := fmt.Fprintln(out, string(o.credentials.SanitizeJSON(b))); encErr != nil {
 			fmt.Fprintln(diag, encErr)
 			return 7
 		}
 	} else if err == nil {
-		fmt.Fprintln(out, formatted(data))
+		b, _ := json.Marshal(data)
+		var safe any
+		_ = json.Unmarshal(o.credentials.SanitizeJSON(b), &safe)
+		fmt.Fprintln(out, formatted(safe))
 	}
 	return code
 }
@@ -254,6 +280,9 @@ func execute(o options, in io.Reader) (any, error) {
 		return nil, project.Fail("invalid_input", "command and operation required; use --help")
 	}
 	group, action := o.args[0], o.args[1]
+	if group == "secret" || group == "access" {
+		return credentialCommand(o)
+	}
 	if group == "request" {
 		return requestCommand(o, in)
 	}

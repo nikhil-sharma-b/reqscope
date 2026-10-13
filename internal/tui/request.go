@@ -85,7 +85,7 @@ func (m *Model) prepareSend() tea.Cmd {
 		m.status = err.Error()
 		return nil
 	}
-	p, err := project.PrepareRequest(m.root, m.activeEnvironment, d, true)
+	p, err := project.PrepareRequestWithCredentials(m.root, m.activeEnvironment, d, true, m.credentials)
 	if err != nil {
 		m.status = err.Error()
 		return nil
@@ -105,7 +105,7 @@ func (m *Model) startSend(d project.RequestDraft, confirmation string) tea.Cmd {
 	m.overlay = ""
 	root, env := m.root, m.activeEnvironment
 	return func() tea.Msg {
-		result, err := project.Send(ctx, root, env, d, project.SendOptions{Interactive: true, Confirmation: confirmation})
+		result, err := project.Send(ctx, root, env, d, project.SendOptions{Interactive: true, Confirmation: confirmation, Credentials: m.credentials})
 		return exchangeMsg{result, err}
 	}
 }

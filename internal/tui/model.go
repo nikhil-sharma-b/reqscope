@@ -36,6 +36,9 @@ var panes = []string{"Project", "Environments", "Endpoints", "Request", "Respons
 var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
+	credentials       *project.Credentials
+	credentialEntry   [7]string
+	credentialField   int
 	requestText       string
 	requestFields     []project.GuidedField
 	prepared          project.PreparedRequest
@@ -72,11 +75,15 @@ type Model struct {
 }
 
 func New(root string, c KeyConfig) (*Model, error) {
+	return NewWithCredentials(root, c, project.DefaultCredentials)
+}
+
+func NewWithCredentials(root string, c KeyConfig, credentials *project.Credentials) (*Model, error) {
 	b, err := Bindings(c)
 	if err != nil {
 		return nil, err
 	}
-	m := &Model{root: root, bindings: b, width: 80, height: 24, mode: "NORMAL", initPath: ".", initName: "My API"}
+	m := &Model{credentials: credentials, root: root, bindings: b, width: 80, height: 24, mode: "NORMAL", initPath: ".", initName: "My API"}
 	if root != "" {
 		s, err := project.Load(root)
 		if err != nil {
@@ -226,6 +233,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.initName = edit(m.initName, msg)
 		}
+		return m, nil
+	}
+	if m.credentialUpdate(msg) {
 		return m, nil
 	}
 	if m.environmentUpdate(msg) {
@@ -440,6 +450,9 @@ func edit(s string, msg tea.KeyPressMsg) string {
 func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.requestAction(action); handled {
 		return m, cmd
+	}
+	if m.credentialAction(action) {
+		return m, nil
 	}
 	if m.environmentAction(action) {
 		return m, nil
@@ -759,16 +772,19 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 	case scenariosPane:
 		body = "No scenarios saved"
 	}
-	return fit(title+"\n"+body, max(1, width), max(1, height))
+	return fit(m.credentials.Sanitize(title+"\n"+body), max(1, width), max(1, height))
 }
 func (m *Model) View() tea.View {
+	if err := m.credentials.Refresh(m.root); err != nil {
+		return tea.NewView("Credential service unavailable; unlock it before viewing project data. Use credential management to replace session credentials.\n" + m.credentials.Sanitize(m.credentialOverlay()))
+	}
 	width, height := m.width, m.height
 	dirty := ""
 	if m.dirty {
 		dirty = " *unsaved"
 	}
 	header := fmt.Sprintf("Reqscope | %s%s | %s | %s", m.draft, dirty, m.mode, panes[m.pane])
-	active := ansi.Wrap(m.activeDestination(), max(1, width), "")
+	active := ansi.Wrap(m.credentials.Sanitize(m.activeDestination()), max(1, width), "")
 	activeHeight := len(strings.Split(active, "\n"))
 	contentHeight := max(1, height-3-activeHeight)
 	var content string
@@ -799,8 +815,11 @@ func (m *Model) View() tea.View {
 	if m.pending != "" {
 		footer = m.pending
 	}
-	base := fit(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches", width, height)
+	base := fit(m.credentials.Sanitize(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches"), width, height)
 	overlay := m.environmentOverlay()
+	if credentialOverlay := m.credentialOverlay(); credentialOverlay != "" {
+		overlay = credentialOverlay
+	}
 	if requestOverlay := m.requestOverlay(); requestOverlay != "" {
 		overlay = requestOverlay
 	}
@@ -847,8 +866,9 @@ func (m *Model) View() tea.View {
 		overlay = m.pending + "\n" + continuations(m.bindings, m.pending) + "\nEsc cancel"
 	}
 	if overlay != "" {
+		overlay = m.credentials.Sanitize(overlay)
 		ow := max(1, min(width, 64))
-		if strings.HasPrefix(m.overlay, "environment-") {
+		if strings.HasPrefix(m.overlay, "environment-") || strings.HasPrefix(m.overlay, "credential-") {
 			ow = width
 			overlay = ansi.Wrap(overlay, max(1, ow-4), "")
 		}
