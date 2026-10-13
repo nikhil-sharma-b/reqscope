@@ -1,0 +1,9 @@
+.PHONY: build check test
+build:
+	mkdir -p bin
+	go build -o bin/reqscope ./cmd/reqscope
+check:
+	go vet ./...
+	go build ./...
+test:
+	go test -race ./...
