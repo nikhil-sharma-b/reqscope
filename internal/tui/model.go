@@ -28,12 +28,18 @@ const (
 	historyPane
 	casesPane
 	scenariosPane
+	schemasPane
 )
 
-var panes = []string{"Project", "Environments", "Endpoints", "Request", "Response", "History", "Cases", "Scenarios"}
+var panes = []string{"Project", "Environments", "Endpoints", "Request", "Response", "History", "Cases", "Scenarios", "Schemas"}
 var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
+	specs         []project.Specification
+	importPath    string
+	importPreview project.Specification
+	detail        string
+
 	paletteQuery                          string
 	nextAction                            string
 	nextCount                             int
@@ -63,6 +69,10 @@ func New(root string, c KeyConfig) (*Model, error) {
 			return nil, err
 		}
 		m.snapshot = s
+		m.specs, err = project.Specifications(root)
+		if err != nil {
+			return nil, err
+		}
 		m.draft = s.Manifest.Name
 	} else {
 		m.overlay = "initialize"
@@ -133,6 +143,11 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snapshot.Environments = msg.snapshot.Environments
 		} else if !m.dirty {
 			m.snapshot = msg.snapshot
+			if specs, err := project.Specifications(m.root); err == nil {
+				m.specs = specs
+			} else {
+				m.status = err.Error()
+			}
 			m.draft = msg.snapshot.Manifest.Name
 		}
 		return m, m.poll()
@@ -175,6 +190,67 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 			m.initPath = edit(m.initPath, msg)
 		} else {
 			m.initName = edit(m.initName, msg)
+		}
+		return m, nil
+	}
+	if m.overlay == "import" {
+		if key == "esc" {
+			m.overlay = ""
+			m.mode = "NORMAL"
+			return m, nil
+		}
+		if key == "enter" {
+			preview, err := project.ImportSpecification(m.root, m.importPath, true)
+			if err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
+			m.importPreview = preview
+			m.overlay = "import-confirm"
+			return m, nil
+		}
+		m.importPath = edit(m.importPath, msg)
+		return m, nil
+	}
+	if m.overlay == "import-confirm" {
+		if key == "esc" {
+			m.overlay = ""
+			m.mode = "NORMAL"
+			return m, nil
+		}
+		if key == "enter" {
+			next, err := project.ImportSpecification(m.root, m.importPath, true)
+			if err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
+			if next.Digest != m.importPreview.Digest {
+				m.importPreview = next
+				m.status = "File changed; review updated preview"
+				return m, nil
+			}
+			_, err = project.ImportReviewedSpecification(m.root, m.importPath, m.importPreview.Digest)
+			if err != nil {
+				m.status = err.Error()
+				return m, nil
+			}
+			m.reload()
+			m.overlay = ""
+			m.mode = "NORMAL"
+			m.pane = endpointsPane
+			m.status = "Specification imported"
+		}
+		return m, nil
+	}
+	if m.overlay == "detail" {
+		if key == "esc" {
+			m.overlay = ""
+		}
+		if key == "j" || key == "down" {
+			m.paletteIndex++
+		}
+		if key == "k" || key == "up" {
+			m.paletteIndex = max(0, m.paletteIndex-1)
 		}
 		return m, nil
 	}
@@ -336,6 +412,14 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	switch action {
+	case "import":
+		m.overlay = "import"
+		m.mode = "INSERT"
+		m.importPath = ""
+	case "schemas":
+		m.pane = schemasPane
+		m.index = 0
+		m.query = ""
 	case "quit":
 		if m.dirty {
 			m.overlay = "confirm-quit"
@@ -403,6 +487,13 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	case "open":
 		if m.pane == projectPane {
 			m.mode = "INSERT"
+		} else if m.pane == endpointsPane || m.pane == schemasPane {
+			details := m.contractDetails()
+			if len(details) > 0 {
+				m.detail = details[min(m.index, len(details)-1)]
+				m.paletteIndex = 0
+				m.overlay = "detail"
+			}
 		} else if m.pane == environmentsPane {
 			items := m.environmentItems()
 			if len(items) > 0 {
@@ -455,6 +546,12 @@ func (m *Model) reload() {
 		return
 	}
 	m.snapshot = s
+	specs, err := project.Specifications(m.root)
+	if err != nil {
+		m.status = err.Error()
+		return
+	}
+	m.specs = specs
 	m.draft = s.Manifest.Name
 	m.status = "Project reloaded"
 }
@@ -468,6 +565,10 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
+	if m.pane == endpointsPane || m.pane == schemasPane {
+		labels, _ := m.contractItems()
+		return labels
+	}
 	if m.pane == environmentsPane {
 		var items []string
 		for _, e := range m.environmentItems() {
@@ -545,8 +646,19 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 			body += mark + items[i].Name + " | " + items[i].Classification + "\n"
 		}
 		body += "\nNo CLI grants configured"
-	case endpointsPane:
-		body = "No specifications imported"
+	case endpointsPane, schemasPane:
+		labels, _ := m.contractItems()
+		if len(labels) == 0 {
+			body = "No matching imported resources"
+		}
+		start := max(0, m.index-max(1, height-2)+1)
+		for i := start; i < len(labels); i++ {
+			mark := "  "
+			if i == m.index {
+				mark = "> "
+			}
+			body += mark + labels[i] + "\n"
+		}
 	case requestPane:
 		body = "No request selected"
 	case responsePane:
@@ -596,6 +708,14 @@ func (m *Model) View() tea.View {
 	base := fit(header+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches", width, height)
 	var overlay string
 	switch m.overlay {
+	case "import":
+		overlay = "Import local specification\nPath: " + m.importPath + "\nEnter preview | Esc cancel\n" + m.status
+	case "import-confirm":
+		overlay = fmt.Sprintf("Import preview\n%s\n%d endpoints, %d schemas\n%s\nEnter apply | Esc cancel\n%s", m.importPath, len(m.importPreview.Endpoints), len(m.importPreview.Schemas), strings.Join(m.importPreview.Diagnostics, "\n"), m.status)
+	case "detail":
+		lines := strings.Split(m.detail, "\n")
+		start := min(m.paletteIndex, max(0, len(lines)-1))
+		overlay = "Contract inspection | j/k scroll | Esc close\n" + strings.Join(lines[start:], "\n")
 	case "initialize":
 		field := "Path"
 		if m.initField == 1 {
@@ -640,3 +760,31 @@ func (m *Model) View() tea.View {
 	v.AltScreen = true
 	return v
 }
+
+func (m *Model) contractItems() ([]string, []string) {
+	labels := []string{}
+	details := []string{}
+	for _, s := range m.specs {
+		if m.pane == schemasPane {
+			for _, schema := range s.Schemas {
+				b, _ := yaml.Marshal(schema)
+				text := string(b) + "Source: " + s.Location + "\n" + strings.Join(s.Diagnostics, "\n")
+				if strings.Contains(strings.ToLower(text), strings.ToLower(m.query)) {
+					labels = append(labels, schema.Name)
+					details = append(details, text)
+				}
+			}
+		} else {
+			for _, e := range s.Endpoints {
+				b, _ := yaml.Marshal(e)
+				text := string(b) + "Source: " + s.Location + "\n" + strings.Join(s.Diagnostics, "\n")
+				if strings.Contains(strings.ToLower(text), strings.ToLower(m.query)) {
+					labels = append(labels, e.Method+" "+e.Path)
+					details = append(details, text)
+				}
+			}
+		}
+	}
+	return labels, details
+}
+func (m *Model) contractDetails() []string { _, details := m.contractItems(); return details }

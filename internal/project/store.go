@@ -134,6 +134,9 @@ func allowedPath(path string) bool {
 	if path == "reqscope.yaml" {
 		return true
 	}
+	if filepath.Dir(path) == "specs" && filepath.Ext(path) == ".yaml" {
+		return validID(strings.TrimSuffix(filepath.Base(path), ".yaml"))
+	}
 	return filepath.Dir(path) == "environments" && filepath.Ext(path) == ".yaml" && validID(path[len("environments/"):len(path)-len(".yaml")])
 }
 func validateChanges(changes []Change) error {
@@ -150,6 +153,17 @@ func validateChanges(changes []Change) error {
 			}
 			if err := validateManifest(m); err != nil {
 				return err
+			}
+		} else if filepath.Dir(c.Path) == "specs" {
+			var spec Specification
+			if err := Decode(c.Content, &spec); err != nil {
+				return err
+			}
+			if err := validateSpecification(spec); err != nil {
+				return err
+			}
+			if filepath.Base(c.Path) != spec.ID+".yaml" {
+				return Fail("invalid_input", "specification filename must match ID")
 			}
 		} else {
 			var e Environment

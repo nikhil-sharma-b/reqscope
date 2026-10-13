@@ -22,6 +22,7 @@ type KeyConfig struct {
 
 func defaults() []Binding {
 	return []Binding{
+		{"import", "Import local specification", []string{"<leader> s i"}}, {"schemas", "Inspect schemas", []string{"<leader> s s"}},
 		{"down", "Move down", []string{"j", "down"}}, {"up", "Move up", []string{"k", "up"}},
 		{"first", "First item", []string{"g g"}}, {"last", "Last item", []string{"G"}},
 		{"half-down", "Half page down", []string{"ctrl+d"}}, {"half-up", "Half page up", []string{"ctrl+u"}},
