@@ -79,17 +79,17 @@ JSON stdout contains exactly one envelope with `schemaVersion`, `success`, `data
 | 0 | Success |
 | 2 | Usage, input or schema validation |
 | 3 | Missing or ambiguous resource, or revision conflict |
-| 4 | Access or credential denial, reserved for access operations |
-| 5 | Transport failure, reserved for execution |
+| 4 | Access or credential denial |
+| 5 | Transport failure |
 | 6 | Failed assertion/validation or unsuccessful scenario, reserved for execution |
 | 7 | Storage or internal failure |
 | 130 | Cancellation |
 
-Future execution precedence follows the specification: unsuccessful scenarios use 6 with per-step causes, ad hoc transport failures use 5, and pre-execution access denial uses 4. Project validation does not authorize execution.
+Execution precedence follows the specification: unsuccessful scenarios use 6 with per-step causes, ad hoc transport failures use 5, and pre-execution access denial uses 4. Project validation does not authorize execution.
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request, response, case, scenario and history panes show empty states until their features arrive.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case, scenario and history panes show empty states until their features arrive.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
@@ -154,7 +154,7 @@ Lowering production classification requires a separate TUI confirmation.
 `environment check-access --env staging --module api [--url URL]` checks the
 shared access policy without sending a request. Every future CLI network runner
 must use this same check with an explicit environment and recheck overrides and
-redirects before contacting them. HTTP sending is implemented by a later ticket.
+redirects before contacting them. The request runner uses this policy.
 A grant permits exact origins, with normalized hosts and effective ports.
 Production access is denied until deliberately approved through the TUI.
 
@@ -165,3 +165,73 @@ its approval if the effective settings are unchanged. Restart restores only a
 nonproduction selection, otherwise a configured nonproduction environment or
 the environment chooser. Protected credential bindings participate in the
 fingerprint; credential configuration belongs to the credentials ticket.
+
+
+Sending HTTP requests
+---------------------
+
+Send an explicit JSON/YAML draft with an approved environment:
+
+```sh
+bin/reqscope request send --project ./my-api --env staging --input request.json --output json
+```
+
+```json
+{
+  "module": "api",
+  "method": "POST",
+  "url": "/items",
+  "query": [{"name": "tag", "value": "one"}, {"name": "tag", "value": "two"}],
+  "headers": [{"name": "X-Trace", "value": "demo"}],
+  "bodyType": "json",
+  "body": "{\"name\":\"edited\"}"
+}
+```
+
+For a contract request, supply `endpointId` from `endpoint list`. Its module and
+method come from the contract, and an omitted URL uses the contract path. `path`
+is an object of parameter names and string values. Query/header entries are
+ordered lists that preserve repeated values. Relative request paths append to
+the configured module base path. An absolute `url`, including a chosen contract
+server URL, must have the configured module origin. CLI `--module`, `--url` and
+`--method` override draft fields, with contract method/module taking precedence.
+
+Supported contract parameter rules are scalar and array form query parameters,
+space/pipe-delimited query arrays, simple path/header parameters, and Swagger 2
+collection formats. Supply array elements as repeated query/header entries;
+path arrays use a serialized string. Unsupported object parameters, cookie
+parameters, label/matrix styles and form/upload bodies fail before connecting.
+Required parameters, scalar types/enums, required body properties and basic JSON
+body types are checked. This is not full JSON Schema validation. Examples remain
+separate suggestions and never regenerate body content. JSON and raw string
+bodies are supported; optional `contentType` sets the media type.
+
+Environment `{{variables}}` expand in URL, path values, query/header values and
+body. Undefined variables fail before connecting. `timeoutMs`, `maxRedirects`
+and `maxBodyBytes` configure limits per draft. Defaults are 30 seconds, five
+redirects and 10 MiB of retained response. TLS certificates are verified.
+Timeouts are bounded at one day and retained bodies at 1 GiB. There are no
+automatic retries. Protected credentials are not read or attached, and explicit
+Authorization, Proxy-Authorization and Cookie headers are rejected until the
+credential attachment/redaction ticket is implemented.
+
+In the TUI, select an environment with Space e s. Space r c composes the selected
+endpoint and shows required inputs, descriptions and example suggestions.
+Space r n creates an explicit draft. Space r e edits the retained draft as JSON;
+Ctrl+u clears the editor, Enter or Esc retains the buffer. Space r x clears the
+draft to allow composing another endpoint. Space r s sends; every production
+send requires y confirmation with method and resolved URL without query values.
+Esc cancels confirmation or an active request. Draft edits and destination
+changes invalidate production confirmation. Space r k also cancels transport.
+
+Responses show status, duration, headers and body. Use / to filter response
+lines, normal motions to scroll, and Space r y to copy the retained body through
+the terminal clipboard. Binary bodies show metadata and cannot be searched or
+copied as text. Truncated bodies are labelled incomplete for full-body
+validation. Clipboard support depends on the terminal's OSC52 support.
+
+HTTP 4xx/5xx statuses are completed exchanges and return exit 0. Input errors
+return 2, missing resources 3, access denials 4, transport/TLS/timeout/redirect
+limit failures 5, storage failures 7, and cancellation 130. Ctrl+C cancels a CLI
+request. JSON output uses the existing versioned envelope, with status, timing,
+headers, retained byte count and binary/truncation flags in `data`.

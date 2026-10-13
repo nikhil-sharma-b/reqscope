@@ -26,6 +26,7 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint search [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag] [--limit N] [--offset N]
   endpoint get ID
   schema list|get ID
+  request send --env ID_OR_NAME --input FILE|- [--module MODULE] [--url URL] [--method METHOD]
   environment list|get ID_OR_NAME
   environment check-access --env ID_OR_NAME --module MODULE [--url URL]
   environment create|update --input FILE|- [--preview]
@@ -132,6 +133,8 @@ func exitCode(err error) int {
 			return 3
 		case "access_denied":
 			return 4
+		case "transport_error":
+			return 5
 		case "cancelled":
 			return 130
 		}
@@ -251,6 +254,9 @@ func execute(o options, in io.Reader) (any, error) {
 		return nil, project.Fail("invalid_input", "command and operation required; use --help")
 	}
 	group, action := o.args[0], o.args[1]
+	if group == "request" {
+		return requestCommand(o, in)
+	}
 	if group == "input-schema" {
 		switch action {
 		case "list":
