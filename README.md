@@ -135,3 +135,33 @@ bin/reqscope endpoint search --project ./my-api --tag pets --group-by tag --offs
 Search returns `items`, `total`, `empty` and `nextOffset`. Pass a non-null `nextOffset` as the next `--offset`, keeping the query and filters unchanged. The default page size is 100, with a maximum of 1000. Pagination describes the current workspace; imports between pages may change results. Grouping includes an operation in each distinct tag group while retaining its endpoint ID.
 
 In the TUI, `Space /` searches all endpoints as you type. `/` filters the focused pane and retains the global endpoint query. `Space s m` cycles the method filter; `Space s t` toggles tag grouping. `n` and `N` navigate matches, and Enter opens the selected contract with source and module context. These actions also appear in `?` help and the command palette. Narrow terminals show one focused pane; pane switches and selection work as in the full layout.
+
+Environment settings and CLI access
+-----------------------------------
+
+Environment IDs stay fixed when names change. Use `environment create` or
+`environment update` with the JSON/YAML input schemas to author base URLs and
+ordinary variables. Base URLs support `{{variable}}` references from the
+selected environment. Undefined or cyclic references fail before authorization.
+
+In the TUI, Space e l opens environments, Space e e edits the selected environment
+as JSON, and Space e c creates one. Ctrl+u clears the editor; Enter saves and Esc
+cancels. Space e s selects the active environment. Space e a shows the resolved
+base URLs, exact origins, production classification and binding fingerprint;
+press y to authorize CLI access. Changing these settings invalidates approval.
+Lowering production classification requires a separate TUI confirmation.
+
+`environment check-access --env staging --module api [--url URL]` checks the
+shared access policy without sending a request. Every future CLI network runner
+must use this same check with an explicit environment and recheck overrides and
+redirects before contacting them. HTTP sending is implemented by a later ticket.
+A grant permits exact origins, with normalized hosts and effective ports.
+Production access is denied until deliberately approved through the TUI.
+
+Approvals, protected classification and TUI selection live under the OS user
+data directory, outside project files, scoped to project ID and canonical local
+path. Copying a project does not copy its approval. Renaming an environment keeps
+its approval if the effective settings are unchanged. Restart restores only a
+nonproduction selection, otherwise a configured nonproduction environment or
+the environment chooser. Protected credential bindings participate in the
+fingerprint; credential configuration belongs to the credentials ticket.

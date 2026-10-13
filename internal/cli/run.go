@@ -27,6 +27,7 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint get ID
   schema list|get ID
   environment list|get ID_OR_NAME
+  environment check-access --env ID_OR_NAME --module MODULE [--url URL]
   environment create|update --input FILE|- [--preview]
   input-schema list|get NAME
   input-schema validate NAME --input FILE|-
@@ -35,6 +36,7 @@ No arguments opens the TUI only when stdin and stdout are terminals.
 `
 
 type options struct {
+	env, module, url                           string
 	project, output, input, keys               string
 	query, method, tag, groupBy, limit, offset string
 	preview                                    bool
@@ -73,6 +75,12 @@ func parse(args []string) (options, error) {
 				value = args[i]
 			}
 			switch key {
+			case "--env":
+				o.env = value
+			case "--module":
+				o.module = value
+			case "--url":
+				o.url = value
 			case "--project":
 				o.project = value
 			case "--output":
@@ -305,7 +313,7 @@ func execute(o options, in io.Reader) (any, error) {
 	if group == "project" && action != "inspect" && action != "validate" && action != "update" {
 		return nil, project.Fail("invalid_input", "unknown project operation %q", action)
 	}
-	if group == "environment" && action != "list" && action != "get" && action != "create" && action != "update" {
+	if group == "environment" && action != "list" && action != "get" && action != "create" && action != "update" && action != "check-access" {
 		return nil, project.Fail("invalid_input", "unknown environment operation %q", action)
 	}
 	expectedArgs := 2
@@ -353,6 +361,8 @@ func execute(o options, in io.Reader) (any, error) {
 		}
 	}
 	switch action {
+	case "check-access":
+		return project.CheckCLIAccess(root, o.env, o.module, o.url)
 	case "list":
 		return s.Environments, nil
 	case "get":
@@ -373,7 +383,7 @@ func execute(o options, in io.Reader) (any, error) {
 			}
 		}
 		b, _ = yaml.Marshal(u.Environment)
-		err = project.Apply(root, []project.Change{{Path: filepath.Join("environments", u.ID+".yaml"), ExpectedRevision: u.Revision, Content: b}}, o.preview)
+		err = project.SaveEnvironment(root, u.Environment, u.Revision, o.preview, false)
 		if err != nil {
 			return nil, err
 		}

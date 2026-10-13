@@ -35,14 +35,18 @@ var panes = []string{"Project", "Environments", "Endpoints", "Request", "Respons
 var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
-	specs         []project.Specification
-	importPath    string
-	importPreview project.Specification
-	detail        string
-	endpointQuery string
-	methodFilter  string
-	groupTags     bool
-	globalSearch  bool
+	activeEnvironment string
+	environmentDraft  project.Resource
+	environmentText   string
+	accessReview      project.AccessReview
+	specs             []project.Specification
+	importPath        string
+	importPreview     project.Specification
+	detail            string
+	endpointQuery     string
+	methodFilter      string
+	groupTags         bool
+	globalSearch      bool
 
 	paletteQuery                          string
 	nextAction                            string
@@ -78,6 +82,9 @@ func New(root string, c KeyConfig) (*Model, error) {
 			return nil, err
 		}
 		m.draft = s.Manifest.Name
+		if e, err := project.RememberedEnvironment(root); err == nil {
+			m.activeEnvironment = e.ID
+		}
 	} else {
 		m.overlay = "initialize"
 		m.mode = "INSERT"
@@ -195,6 +202,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		} else {
 			m.initName = edit(m.initName, msg)
 		}
+		return m, nil
+	}
+	if m.environmentUpdate(msg) {
 		return m, nil
 	}
 	if m.overlay == "import" {
@@ -404,6 +414,9 @@ func edit(s string, msg tea.KeyPressMsg) string {
 	return s
 }
 func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
+	if m.environmentAction(action) {
+		return m, nil
+	}
 	if m.dirty && m.pane == projectPane {
 		switch action {
 		case "pane-left", "pane-right", "environments", "endpoints", "request", "response", "history", "cases", "scenarios", "endpoint-search":
@@ -679,7 +692,7 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 			}
 			body += mark + items[i].Name + " | " + items[i].Classification + "\n"
 		}
-		body += "\nNo CLI grants configured"
+		body += "\nCLI access requires TUI approval"
 	case endpointsPane, schemasPane:
 		labels, _ := m.contractItems()
 		if len(labels) == 0 {
@@ -717,7 +730,9 @@ func (m *Model) View() tea.View {
 		dirty = " *unsaved"
 	}
 	header := fmt.Sprintf("Reqscope | %s%s | %s | %s", m.draft, dirty, m.mode, panes[m.pane])
-	contentHeight := max(1, height-3)
+	active := ansi.Wrap(m.activeDestination(), max(1, width), "")
+	activeHeight := len(strings.Split(active, "\n"))
+	contentHeight := max(1, height-3-activeHeight)
 	var content string
 	if width < 90 || m.zoom {
 		content = m.paneView(m.pane, width, contentHeight)
@@ -746,8 +761,8 @@ func (m *Model) View() tea.View {
 	if m.pending != "" {
 		footer = m.pending
 	}
-	base := fit(header+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches", width, height)
-	var overlay string
+	base := fit(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches", width, height)
+	overlay := m.environmentOverlay()
 	switch m.overlay {
 	case "import":
 		overlay = "Import local specification\nPath: " + m.importPath + "\nEnter preview | Esc cancel\n" + m.status
@@ -792,6 +807,10 @@ func (m *Model) View() tea.View {
 	}
 	if overlay != "" {
 		ow := max(1, min(width, 64))
+		if strings.HasPrefix(m.overlay, "environment-") {
+			ow = width
+			overlay = ansi.Wrap(overlay, max(1, ow-4), "")
+		}
 		oh := max(1, min(height, len(strings.Split(overlay, "\n"))+2))
 		style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Width(max(1, ow-2))
 		box := fit(style.Render(fit(overlay, max(1, ow-2), max(1, oh-2))), ow, oh)
