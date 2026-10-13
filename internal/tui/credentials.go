@@ -151,3 +151,34 @@ func (m *Model) credentialOverlay() string {
 	}
 	return ""
 }
+
+// Recovery displays only environment identities and masked entry, since ordinary
+// project text may contain values from the currently unreadable OS store.
+func (m *Model) credentialRecoveryView() tea.View {
+	lines := []string{"Credential service unavailable. Unlock it or replace credentials with explicit session-only storage.", "Environment IDs:"}
+	for i, e := range m.environmentItems() {
+		marker := "  "
+		if i == m.index {
+			marker = "> "
+		}
+		lines = append(lines, marker+e.ID)
+	}
+	lines = append(lines, "Active environment: "+m.activeEnvironment)
+	for _, binding := range m.bindings {
+		switch binding.Action {
+		case "environments", "environment-select", "credential-edit", "credential-delete", "credential-inspect":
+			lines = append(lines, strings.Join(binding.Keys, ", ")+" "+binding.Description)
+		}
+	}
+	lines = append(lines, "j/k move in environments; Esc cancels entry.", m.credentialOverlay())
+	if m.overlay == "detail" {
+		states, err := m.credentials.Inspect(m.root, m.activeEnvironment)
+		if err == nil {
+			b, _ := json.Marshal(states)
+			lines = append(lines, string(b))
+		}
+	}
+	view := tea.NewView(m.credentials.Sanitize(strings.Join(lines, "\n")))
+	view.AltScreen = true
+	return view
+}

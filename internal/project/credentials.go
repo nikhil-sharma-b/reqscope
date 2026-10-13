@@ -472,7 +472,7 @@ func (c *Credentials) SanitizeJSON(raw []byte) []byte {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	if !json.Valid(raw) || decoder.Decode(&v) != nil {
-		return []byte(c.Sanitize(string(raw)))
+		return []byte(c.sanitizeTextPositions(string(raw), nil))
 	}
 	var walk func(any) any
 	walk = func(v any) any {
@@ -539,6 +539,10 @@ func (c *Credentials) sanitizeExchange(result *Exchange, used []localCredential)
 		if structured && !json.Valid([]byte(result.Body)) {
 			result.Body = ""
 			result.BodyWithheld = true
+		} else if media == "application/xml" || media == "text/xml" || strings.HasSuffix(media, "+xml") || strings.HasPrefix(trimmed, "<") {
+			var safe bool
+			result.Body, safe = c.sanitizeXML(result.Body, used)
+			result.BodyWithheld = !safe
 		} else if media == "application/x-www-form-urlencoded" {
 			fields, err := url.ParseQuery(result.Body)
 			if err != nil {
@@ -565,6 +569,9 @@ func (c *Credentials) sanitizeExchange(result *Exchange, used []localCredential)
 			}
 		} else {
 			result.Body = string(c.SanitizeJSON([]byte(result.Body)))
+			if !json.Valid([]byte(result.Body)) {
+				result.Body = c.sanitizeTextPositions(result.Body, used)
+			}
 		}
 		// Redact bound body/query field names in structured responses as well.
 		for _, item := range used {
@@ -614,4 +621,19 @@ func (c *Credentials) SanitizeError(err error) error {
 		return &Error{Code: pe.Code, Message: c.Sanitize(pe.Message)}
 	}
 	return errors.New(c.Sanitize(err.Error()))
+}
+
+// Plain text header-style and form-style assignments also have known positions.
+var authenticationAssignment = regexp.MustCompile(`(?im)((?:authorization|proxy-authorization|cookie|set-cookie|password|passwd|token|access_token|refresh_token|api_key|apikey|secret|client_secret)[ \t]*[:=][ \t]*)([^\r\n&]+)`)
+
+func (c *Credentials) sanitizeTextPositions(text string, used []localCredential) string {
+	text = c.Sanitize(text)
+	text = authenticationAssignment.ReplaceAllString(text, "${1}[REDACTED]")
+	for _, item := range used {
+		if item.Field != "" {
+			position := regexp.MustCompile(`(?im)(` + regexp.QuoteMeta(item.Field) + `[ \t]*[:=][ \t]*)([^\r\n&]+)`)
+			text = position.ReplaceAllString(text, "${1}[REDACTED]")
+		}
+	}
+	return text
 }

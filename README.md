@@ -289,10 +289,11 @@ the store is available, so unknown stored values cannot leak through inspection.
 
 Registered values, their JSON/URL representations and basic encoding are
 redacted before runner results, errors, CLI previews, TUI rendering and response
-copying. Response authentication headers and common JSON authentication fields
+copying. Response authentication headers and common JSON/XML authentication fields
 are redacted even for unregistered server-generated values. Binary response
 bodies expose metadata only. Invalid or incomplete structured JSON bodies are
-withheld when they cannot be safely sanitized; form-encoded authentication fields
+withheld when they cannot be safely sanitized. XML elements and attributes,
+plain authentication assignments and form-encoded authentication fields
 are redacted as well. Arbitrary transformations or encodings performed by
 a server can evade redaction; this is not guaranteed secret detection.
 

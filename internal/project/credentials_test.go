@@ -264,3 +264,24 @@ func TestTruncatedAndFormAuthenticationPositionsAreSanitized(t *testing.T) {
 		}
 	}
 }
+
+func TestXMLAuthenticationPositionsAndTruncation(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/xml")
+		io.WriteString(w, `<response access_token="attribute-secret"><access_token>element-secret</access_token><message>visible</message></response>`)
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	for _, capBytes := range []int64{1024, 100} {
+		result, err := project.Send(context.Background(), root, "staging", project.RequestDraft{Module: "api", Method: "GET", URL: "/", MaxBodyBytes: capBytes}, project.SendOptions{})
+		if err != nil {
+			t.Fatal(err)
+		}
+		if strings.Contains(result.Body, "attribute-secret") || strings.Contains(result.Body, "element-secret") {
+			t.Fatalf("XML authentication leaked %s", result.Body)
+		}
+		if capBytes == 1024 && !strings.Contains(result.Body, "visible") {
+			t.Fatal("safe XML content lost")
+		}
+	}
+}

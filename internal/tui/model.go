@@ -776,7 +776,7 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 }
 func (m *Model) View() tea.View {
 	if err := m.credentials.Refresh(m.root); err != nil {
-		return tea.NewView("Credential service unavailable; unlock it before viewing project data. Use credential management to replace session credentials.\n" + m.credentials.Sanitize(m.credentialOverlay()))
+		return m.credentialRecoveryView()
 	}
 	width, height := m.width, m.height
 	dirty := ""
