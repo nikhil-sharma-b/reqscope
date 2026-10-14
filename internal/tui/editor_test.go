@@ -58,6 +58,9 @@ func TestExternalEditorRoundTrips(t *testing.T) {
 			if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
 				t.Fatal(err)
 			}
+			if err := project.SelectEnvironment(root, "staging"); err != nil {
+				t.Fatal(err)
+			}
 			vault := project.NewCredentials(&tuiCredentialStore{values: map[string]string{}})
 			if err := vault.Save(root, "staging", project.CredentialBinding{Name: "login", Kind: "bearer", Module: "api", Destination: "https://api.example.test/", In: "header", Field: "Authorization"}, "editor-private-token", true); err != nil {
 				t.Fatal(err)
@@ -134,8 +137,8 @@ func TestExternalEditorRoundTrips(t *testing.T) {
 					key(m, k)
 				}
 				_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-				if cmd != nil {
-					t.Fatal("invalid body scheduled a send")
+				if cmd != nil || !strings.Contains(m.View().Content, "invalid JSON body") {
+					t.Fatalf("invalid body was not rejected: %s", m.View().Content)
 				}
 			}
 		})
