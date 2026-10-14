@@ -141,7 +141,7 @@ Execution precedence follows the specification: unsuccessful scenarios use 6 wit
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case, scenario and history panes show empty states until their features arrive.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case and scenario panes support saved workflows. The history pane shows an empty state until history storage arrives.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
@@ -501,3 +501,78 @@ outcomes. HTTP 4xx/5xx are completed exchanges. Failed or incomplete checks
 exit with code 6, transport failures with 5, and invalid assertions with 2.
 Truncated or unavailable bodies cannot pass JSON or response schema checks.
 Check diagnostics omit actual and expected values to protect secrets.
+
+Sequential scenarios
+--------------------
+
+A scenario contains a UUID `id`, a display `name`, and ordered `steps`. Each
+step has a unique `id` and references a saved case by UUID `caseId`.
+`overrides` supplies ordinary variables for that step. `extracts` maps names
+to JSON Pointers into its response. Later steps use `bindings` to explicitly
+identify a producer step and one of its named extracts:
+
+```json
+{
+  "id": "00000000-0000-4000-8000-000000000012",
+  "name": "Create and inspect",
+  "steps": [
+    {
+      "id": "create",
+      "caseId": "00000000-0000-4000-8000-000000000001",
+      "overrides": {"name": "Example"},
+      "extracts": {"itemId": "/id"}
+    },
+    {
+      "id": "inspect",
+      "caseId": "00000000-0000-4000-8000-000000000002",
+      "bindings": {"item": {"stepId": "create", "extract": "itemId"}}
+    }
+  ]
+}
+```
+
+The inspect case can use `{{item}}` in its request. JSON strings become string
+inputs; other JSON values retain their JSON representation, including `null`
+and exact numbers. Extraction requires a complete, retained JSON response.
+Authentication fields are sanitized and cannot be passed as ordinary extracts.
+Extracts remain local to the run. Nested scenarios, loops and scripts are
+unsupported and rejected as unknown fields.
+
+```sh
+bin/reqscope scenario create --project ./my-api --input scenario.json --preview
+bin/reqscope scenario create --project ./my-api --input scenario.json
+bin/reqscope scenario list --project ./my-api
+bin/reqscope scenario get SCENARIO_ID --project ./my-api
+bin/reqscope scenario update --project ./my-api --input edited-scenario.json
+bin/reqscope scenario validate SCENARIO_ID --project ./my-api
+bin/reqscope scenario run SCENARIO_ID --project ./my-api --env staging --output json
+bin/reqscope scenario delete SCENARIO_ID --project ./my-api --input deletion.json
+```
+
+Updates and deletion require the `revision` from `scenario get`. Create,
+update and delete support `--preview`; run does not. An optional run input
+uses `{"variables":{"name":"value"}}`. `input-schema list|get|validate`
+includes `scenario.create`, `scenario.update`, `scenario.delete` and
+`scenario.run`. Validation checks references without sending or authorizing.
+
+All cases and contracts are snapshotted before execution. Overrides never
+change saved cases. Variable precedence is project defaults, environment,
+case, run input, step overrides, then bound extracts. Access and credential
+checks remain live. `case get` and case write previews identify affected
+scenario files; deletion refuses referenced cases.
+
+The default policy stops after a transport, assertion or extraction failure,
+or an incomplete mandatory check. Set `continueOnFailure: true` to run later
+independent steps. Steps depending on a failed or skipped producer are skipped
+with a reason. Every step is mandatory: any failure or skip keeps the report
+unsuccessful. Reports include sanitized exchanges, per-step causes, case
+revisions and contract digests. Unsuccessful scenarios exit 6, including
+transport failures inside a scenario; access denial before any send exits 4,
+and cancellation exits 130. Ctrl+C cancels active transport and further steps.
+
+In the TUI, `<leader> s l` lists scenarios, `s n` creates one, `s e` edits the
+selected scenario JSON, `s v` validates, `s r` runs, `s x` deletes, and `s k`
+cancels. Enter saves the editor; Esc cancels editing. Production requires a
+confirmation showing method and sanitized URL before each step send. Esc at
+that prompt cancels the whole scenario. A shared-case save shows affected
+scenarios and asks for confirmation before writing.

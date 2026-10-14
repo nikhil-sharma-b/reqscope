@@ -158,6 +158,9 @@ func PrepareRequestWithCredentials(root, env string, d RequestDraft, interactive
 	return p, c.SanitizeError(err)
 }
 func prepareRequest(root, env string, d RequestDraft, interactive bool) (PreparedRequest, error) {
+	return prepareRequestSnapshot(root, env, d, interactive, nil, false)
+}
+func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, endpoint *Endpoint, snapshot bool) (PreparedRequest, error) {
 	var p PreparedRequest
 	if !interactive && strings.TrimSpace(env) == "" {
 		return p, Fail("access_denied", "every CLI network run requires explicit --env")
@@ -180,17 +183,18 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	for name, value := range d.Variables {
 		vars[name] = value
 	}
-	var endpoint *Endpoint
 	if d.EndpointID != "" {
-		specs, err := Specifications(root)
-		if err != nil {
-			return p, err
-		}
-		for _, spec := range specs {
-			for _, ep := range spec.Endpoints {
-				if ep.ID == d.EndpointID {
-					copy := ep
-					endpoint = &copy
+		if !snapshot {
+			specs, err := Specifications(root)
+			if err != nil {
+				return p, err
+			}
+			for _, spec := range specs {
+				for _, ep := range spec.Endpoints {
+					if ep.ID == d.EndpointID {
+						copy := ep
+						endpoint = &copy
+					}
 				}
 			}
 		}
@@ -386,12 +390,14 @@ func SanitizedDestination(raw string) string {
 	return u.String()
 }
 func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (result Exchange, err error) {
+	return send(ctx, root, env, d, opts, nil, false)
+}
+func send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions, endpoint *Endpoint, snapshot bool) (result Exchange, err error) {
 	v, err := decodeValidation(opts.Validation)
 	if err != nil {
 		return result, err
 	}
-	var endpoint *Endpoint
-	if v.ResponseSchema && d.EndpointID != "" {
+	if !snapshot && v.ResponseSchema && d.EndpointID != "" {
 		specs, e := Specifications(root)
 		if e != nil {
 			return result, e
@@ -418,7 +424,15 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		c = DefaultCredentials
 	}
 	defer func() { err = c.SanitizeError(err) }()
-	p, err := PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
+	var p PreparedRequest
+	if snapshot {
+		if err = c.Refresh(root); err == nil {
+			p, err = prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true)
+			p.URL = c.Sanitize(p.URL)
+		}
+	} else {
+		p, err = PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
+	}
 	if err != nil {
 		return Exchange{}, err
 	}

@@ -54,7 +54,7 @@ func caseCommand(o options, in io.Reader) (any, error) {
 				}
 			}
 			resource, err := project.SaveCase(root, v.Case, v.Revision, o.preview)
-			return map[string]any{"preview": o.preview, "resource": resource}, err
+			return map[string]any{"preview": o.preview, "resource": resource, "affectedScenarios": resource.References}, err
 		case CaseDuplicateInput:
 			resource, err := project.DuplicateCase(root, o.args[2], v.Name, o.preview)
 			return map[string]any{"preview": o.preview, "resource": resource}, err

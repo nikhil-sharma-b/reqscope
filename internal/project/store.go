@@ -135,7 +135,7 @@ func allowedPath(path string) bool {
 	if path == "reqscope.yaml" {
 		return true
 	}
-	if (filepath.Dir(path) == "specs" || filepath.Dir(path) == "cases") && filepath.Ext(path) == ".yaml" {
+	if (filepath.Dir(path) == "specs" || filepath.Dir(path) == "cases" || filepath.Dir(path) == "scenarios") && filepath.Ext(path) == ".yaml" {
 		return validID(strings.TrimSuffix(filepath.Base(path), ".yaml"))
 	}
 	return filepath.Dir(path) == "environments" && filepath.Ext(path) == ".yaml" && validID(path[len("environments/"):len(path)-len(".yaml")])
@@ -148,7 +148,7 @@ func validateChanges(changes []Change) error {
 		}
 		seen[c.Path] = true
 		if c.Delete {
-			if filepath.Dir(c.Path) != "cases" || c.ExpectedRevision == "" || len(c.Content) != 0 {
+			if (filepath.Dir(c.Path) != "cases" && filepath.Dir(c.Path) != "scenarios") || c.ExpectedRevision == "" || len(c.Content) != 0 {
 				return Fail("invalid_input", "invalid resource deletion")
 			}
 			continue
@@ -160,6 +160,17 @@ func validateChanges(changes []Change) error {
 			}
 			if err := validateManifest(m); err != nil {
 				return err
+			}
+		} else if filepath.Dir(c.Path) == "scenarios" {
+			var value Scenario
+			if err := Decode(c.Content, &value); err != nil {
+				return err
+			}
+			if err := ValidateScenario(value); err != nil {
+				return err
+			}
+			if filepath.Base(c.Path) != value.ID+".yaml" {
+				return Fail("invalid_input", "scenario filename must match ID")
 			}
 		} else if filepath.Dir(c.Path) == "cases" {
 			var value Case
@@ -258,8 +269,47 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 	if err := validateChanges(changes); err != nil {
 		return err
 	}
+	// Validate scenario references against the cases this transaction will leave.
+	for _, change := range changes {
+		if filepath.Dir(change.Path) != "scenarios" || change.Delete {
+			continue
+		}
+		items, err := cases(root)
+		if err != nil {
+			return err
+		}
+		byID := map[string]CaseResource{}
+		for _, item := range items {
+			byID[item.ID] = item
+		}
+		for _, c := range changes {
+			if filepath.Dir(c.Path) == "cases" {
+				id := strings.TrimSuffix(filepath.Base(c.Path), ".yaml")
+				if c.Delete {
+					delete(byID, id)
+				} else {
+					var value Case
+					if err := Decode(c.Content, &value); err != nil {
+						return err
+					}
+					byID[id] = CaseResource{Case: value}
+				}
+			}
+		}
+		items = nil
+		for _, item := range byID {
+			items = append(items, item)
+		}
+		var value Scenario
+		if err := Decode(change.Content, &value); err != nil {
+			return err
+		}
+		if err := validateScenarioCases(value, items); err != nil {
+			return err
+		}
+	}
 	for _, c := range changes {
-		if c.Delete {
+		if c.Delete && filepath.Dir(c.Path) == "cases" {
 			references, err := caseReferences(root, strings.TrimSuffix(filepath.Base(c.Path), ".yaml"))
 			if err != nil {
 				return err
