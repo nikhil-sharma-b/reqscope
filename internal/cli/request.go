@@ -16,6 +16,26 @@ func requestCommand(o options, in io.Reader) (any, error) {
 	if err != nil {
 		return nil, err
 	}
+	if o.caseSelector != "" {
+		overrides := map[string]string{}
+		if o.input != "" {
+			b, err := input(o, in)
+			if err != nil {
+				return nil, err
+			}
+			value, err := validateInput("case.run", b)
+			if err != nil {
+				return nil, err
+			}
+			overrides = value.(CaseRunInput).Variables
+		}
+		if o.module != "" || o.url != "" || o.method != "" {
+			return nil, project.Fail("invalid_input", "saved runs accept variable overrides only")
+		}
+		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
+		defer stop()
+		return project.SendCase(ctx, root, o.env, o.caseSelector, overrides, project.SendOptions{Credentials: o.credentials})
+	}
 	b, err := input(o, in)
 	if err != nil {
 		return nil, err

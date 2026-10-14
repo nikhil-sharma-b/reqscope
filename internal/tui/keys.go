@@ -48,6 +48,12 @@ func defaults() []Binding {
 		{"credential-edit", "Add or replace protected credential", []string{"<leader> e k"}},
 		{"credential-delete", "Delete protected credential", []string{"<leader> e d"}},
 		{"credential-inspect", "Inspect credential names and state", []string{"<leader> e i"}},
+		{"case-open", "Open selected case", []string{"<leader> c o"}},
+		{"case-save", "Save current request as case", []string{"<leader> c s"}},
+		{"case-edit", "Edit saved case", []string{"<leader> c e"}},
+		{"case-duplicate", "Duplicate selected case", []string{"<leader> c d"}},
+		{"case-delete", "Delete selected case", []string{"<leader> c x"}},
+		{"case-run", "Run selected case", []string{"<leader> c r"}},
 	}
 }
 func Bindings(c KeyConfig) ([]Binding, error) {

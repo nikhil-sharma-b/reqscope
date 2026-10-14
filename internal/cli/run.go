@@ -27,6 +27,10 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint get ID
   schema list|get ID
   request send --env ID_OR_NAME --input FILE|- [--module MODULE] [--url URL] [--method METHOD]
+  case list|get ID_OR_NAME
+  case create|update --input FILE|- [--preview]
+  case duplicate|delete ID_OR_NAME --input FILE|- [--preview]
+  request send --env ID_OR_NAME --case ID_OR_NAME [--input OVERRIDES_FILE|-]
   secret list|inspect --env ID_OR_NAME
   access inspect --env ID_OR_NAME
   environment list|get ID_OR_NAME
@@ -40,7 +44,7 @@ No arguments opens the TUI only when stdin and stdout are terminals.
 
 type options struct {
 	credentials                                *project.Credentials
-	env, module, url, selection                string
+	env, module, url, selection, caseSelector  string
 	project, output, input, keys               string
 	query, method, tag, groupBy, limit, offset string
 	preview                                    bool
@@ -84,6 +88,8 @@ func parse(args []string) (options, error) {
 				value = args[i]
 			}
 			switch key {
+			case "--case":
+				o.caseSelector = value
 			case "--env":
 				o.env = value
 			case "--module":
@@ -284,6 +290,9 @@ func execute(o options, in io.Reader) (any, error) {
 	group, action := o.args[0], o.args[1]
 	if group == "secret" || group == "access" {
 		return credentialCommand(o)
+	}
+	if group == "case" {
+		return caseCommand(o, in)
 	}
 	if group == "request" {
 		return requestCommand(o, in)

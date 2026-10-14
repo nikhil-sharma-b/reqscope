@@ -29,12 +29,13 @@ type Locations struct {
 	Scenarios    string `json:"scenarios" yaml:"scenarios"`
 }
 type Manifest struct {
-	FormatVersion int       `json:"formatVersion" yaml:"formatVersion"`
-	ID            string    `json:"id" yaml:"id"`
-	Name          string    `json:"name" yaml:"name"`
-	Locations     Locations `json:"resources" yaml:"resources"`
-	Modules       []string  `json:"modules" yaml:"modules"`
-	Sources       []string  `json:"sources" yaml:"sources"`
+	FormatVersion int               `json:"formatVersion" yaml:"formatVersion"`
+	ID            string            `json:"id" yaml:"id"`
+	Name          string            `json:"name" yaml:"name"`
+	Locations     Locations         `json:"resources" yaml:"resources"`
+	Modules       []string          `json:"modules" yaml:"modules"`
+	Sources       []string          `json:"sources" yaml:"sources"`
+	Variables     map[string]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 }
 type Environment struct {
 	ID             string            `json:"id" yaml:"id"`

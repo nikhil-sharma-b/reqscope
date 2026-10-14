@@ -4,6 +4,8 @@ import (
 	"encoding/json"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"go.yaml.in/yaml/v3"
+	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -19,7 +21,7 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"project.init", "project.update", "environment.create", "environment.update", "request.send"}
+var schemaNames = []string{"project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
@@ -31,6 +33,7 @@ func schema(name string) (map[string]any, error) {
 		for _, name := range []string{"endpointId", "module", "method", "url", "body", "bodyType", "contentType"} {
 			props[name] = map[string]any{"type": "string"}
 		}
+		props["variables"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 		props["path"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 		field := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"name": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}}, "required": []string{"name", "value"}}
 		for _, name := range []string{"query", "headers"} {
@@ -43,6 +46,21 @@ func schema(name string) (map[string]any, error) {
 		props["timeoutMs"].(map[string]any)["maximum"] = 86400000
 		props["maxBodyBytes"].(map[string]any)["maximum"] = 1073741824
 		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw"}
+	case "case.create", "case.update":
+		draft, _ := schema("request.send")
+		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": map[string]any{"type": "object"}}
+		required = []string{"id", "name", "request"}
+		if name == "case.update" {
+			props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
+			required = append(required, "revision")
+		}
+	case "case.duplicate":
+	case "case.delete":
+		props = map[string]any{"revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+		required = []string{"revision"}
+	case "case.run":
+		props = map[string]any{"variables": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+		required = []string{}
 	case "project.init":
 	case "project.update":
 		props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
@@ -72,6 +90,9 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	if name == "request.send" {
+		if err := validateDocument(b, shape); err != nil {
+			return nil, err
+		}
 		var d project.RequestDraft
 		if err := project.Decode(b, &d); err != nil {
 			return nil, err
@@ -91,6 +112,42 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "case.create", "case.update":
+		var v CaseInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		if err := project.ValidateCase(v.Case); err != nil {
+			return nil, err
+		}
+		if name == "case.update" && !validRevision(v.Revision) {
+			return nil, project.Fail("invalid_input", "update requires revision from case get")
+		}
+		if name == "case.create" && v.Revision != "" {
+			return nil, project.Fail("invalid_input", "create does not accept revision")
+		}
+		return v, nil
+	case "case.duplicate":
+		var v CaseDuplicateInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, validName(v.Name)
+	case "case.delete":
+		var v CaseDeleteInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		if !validRevision(v.Revision) {
+			return nil, project.Fail("invalid_input", "delete requires revision from case get")
+		}
+		return v, nil
+	case "case.run":
+		var v CaseRunInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "project.init":
 		var v InitInput
 		if err := project.Decode(b, &v); err != nil {
@@ -148,46 +205,120 @@ func validRevision(s string) bool {
 }
 func formatted(v any) string { b, _ := json.MarshalIndent(v, "", "  "); return string(b) }
 
-// Validate the YAML node types before decoding, which otherwise coerces numbers to strings.
+// Validate node types before decoding, which otherwise coerces numbers to strings.
 func validateDocument(b []byte, shape map[string]any) error {
 	var doc yaml.Node
 	if err := project.Decode(b, &doc); err != nil {
 		return err
 	}
-	if len(doc.Content) != 1 || doc.Content[0].Kind != yaml.MappingNode {
-		return project.Fail("invalid_input", "input must be an object")
+	if len(doc.Content) != 1 {
+		return project.Fail("invalid_input", "input must be one object")
 	}
-	props := shape["properties"].(map[string]any)
-	seen := map[string]bool{}
-	nodes := doc.Content[0].Content
-	for i := 0; i < len(nodes); i += 2 {
-		key, value := nodes[i], nodes[i+1]
-		rule, ok := props[key.Value]
-		if !ok || seen[key.Value] || key.Tag != "!!str" {
-			return project.Fail("invalid_input", "unknown or duplicate field %q", key.Value)
+	return validateNode(doc.Content[0], shape, "input")
+}
+func propertyMap(value any) map[string]any {
+	if m, ok := value.(map[string]any); ok {
+		return m
+	}
+	if m, ok := value.(map[string]string); ok {
+		result := map[string]any{}
+		for key, v := range m {
+			result[key] = v
 		}
-		seen[key.Value] = true
-		property := rule.(map[string]any)
-		if property["type"] == "object" {
-			if value.Kind != yaml.MappingNode {
-				return project.Fail("invalid_input", "%s must be an object", key.Value)
+		return result
+	}
+	return nil
+}
+func validateNode(node *yaml.Node, rule map[string]any, path string) error {
+	fail := func() error { return project.Fail("invalid_input", "%s has invalid type or value", path) }
+	switch rule["type"] {
+	case "object":
+		if node.Kind != yaml.MappingNode {
+			return fail()
+		}
+		props := propertyMap(rule["properties"])
+		seen := map[string]bool{}
+		for i := 0; i < len(node.Content); i += 2 {
+			key, value := node.Content[i], node.Content[i+1]
+			if key.Tag != "!!str" || seen[key.Value] {
+				return fail()
 			}
-			keys := map[string]bool{}
-			for j := 0; j < len(value.Content); j += 2 {
-				k, v := value.Content[j], value.Content[j+1]
-				if k.Tag != "!!str" || v.Tag != "!!str" || v.Kind != yaml.ScalarNode || keys[k.Value] {
-					return project.Fail("invalid_input", "%s must contain unique string keys and string values", key.Value)
+			seen[key.Value] = true
+			child, ok := props[key.Value]
+			if !ok {
+				if rule["additionalProperties"] == false {
+					return project.Fail("invalid_input", "unknown field %s.%s", path, key.Value)
 				}
-				keys[k.Value] = true
+				child = rule["additionalProperties"]
 			}
-		} else if value.Kind != yaml.ScalarNode || value.Tag != "!!str" {
-			return project.Fail("invalid_input", "%s must be a string", key.Value)
+			if next := propertyMap(child); next != nil {
+				if err := validateNode(value, next, path+"."+key.Value); err != nil {
+					return err
+				}
+			}
+		}
+		if required, ok := rule["required"].([]string); ok {
+			for _, key := range required {
+				if !seen[key] {
+					return project.Fail("invalid_input", "%s.%s is required", path, key)
+				}
+			}
+		}
+	case "array":
+		if node.Kind != yaml.SequenceNode {
+			return fail()
+		}
+		for _, child := range node.Content {
+			if err := validateNode(child, propertyMap(rule["items"]), path+"[]"); err != nil {
+				return err
+			}
+		}
+	case "integer":
+		if node.Kind != yaml.ScalarNode || node.Tag != "!!int" {
+			return fail()
+		}
+		var value int64
+		if err := node.Decode(&value); err != nil {
+			return fail()
+		}
+		for key, bound := range rule {
+			switch key {
+			case "minimum", "maximum":
+				number, err := strconv.ParseInt(fmtNumber(bound), 10, 64)
+				if err != nil {
+					return fail()
+				}
+				if key == "minimum" && value < number || key == "maximum" && value > number {
+					return fail()
+				}
+			}
+		}
+	case "string":
+		if node.Kind != yaml.ScalarNode || node.Tag != "!!str" {
+			return fail()
+		}
+		if pattern, ok := rule["pattern"].(string); ok {
+			matched, err := regexp.MatchString(pattern, node.Value)
+			if err != nil || !matched {
+				return fail()
+			}
+		}
+	default:
+		if _, ok := rule["enum"]; ok && (node.Kind != yaml.ScalarNode || node.Tag != "!!str") {
+			return fail()
 		}
 	}
-	for _, key := range shape["required"].([]string) {
-		if !seen[key] {
-			return project.Fail("invalid_input", "%s is required", key)
+	if choices, ok := rule["enum"].([]string); ok {
+		found := false
+		for _, choice := range choices {
+			if node.Value == choice {
+				found = true
+			}
+		}
+		if !found {
+			return fail()
 		}
 	}
 	return nil
 }
+func fmtNumber(value any) string { b, _ := json.Marshal(value); return string(b) }

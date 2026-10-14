@@ -17,6 +17,7 @@ type RequestField struct {
 	Value string `json:"value" yaml:"value"`
 }
 type RequestDraft struct {
+	Variables    map[string]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 	EndpointID   string            `json:"endpointId,omitempty" yaml:"endpointId,omitempty"`
 	Module       string            `json:"module" yaml:"module"`
 	Method       string            `json:"method" yaml:"method"`
@@ -34,6 +35,7 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
+	Variables    map[string]string
 	Credentials  *Credentials
 	Interactive  bool
 	Confirmation string
@@ -48,6 +50,8 @@ type PreparedRequest struct {
 	draft          RequestDraft
 }
 type Exchange struct {
+	CaseID        string      `json:"caseId,omitempty"`
+	Draft         bool        `json:"draft"`
 	Method        string      `json:"method"`
 	Destination   string      `json:"destination"`
 	Status        int         `json:"status"`
@@ -153,6 +157,16 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if err != nil {
 		return p, err
 	}
+	vars := map[string]string{}
+	for name, value := range s.Manifest.Variables {
+		vars[name] = value
+	}
+	for name, value := range e.Variables {
+		vars[name] = value
+	}
+	for name, value := range d.Variables {
+		vars[name] = value
+	}
 	var endpoint *Endpoint
 	if d.EndpointID != "" {
 		specs, err := Specifications(root)
@@ -180,7 +194,7 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if err != nil {
 		return p, err
 	}
-	raw, err := interpolate(d.URL, e.Variables)
+	raw, err := interpolate(d.URL, vars)
 	if err != nil {
 		return p, err
 	}
@@ -195,14 +209,14 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 
 	headers := http.Header{}
 	for _, f := range d.Query {
-		v, err := interpolate(f.Value, e.Variables)
+		v, err := interpolate(f.Value, vars)
 		if err != nil {
 			return p, err
 		}
 		query.Add(f.Name, v)
 	}
 	for _, f := range d.Headers {
-		v, err := interpolate(f.Value, e.Variables)
+		v, err := interpolate(f.Value, vars)
 		if err != nil {
 			return p, err
 		}
@@ -211,7 +225,7 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	}
 	paths := map[string]string{}
 	for name, v := range d.Path {
-		v, err = interpolate(v, e.Variables)
+		v, err = interpolate(v, vars)
 		if err != nil {
 			return p, err
 		}
@@ -250,7 +264,7 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if err != nil {
 		return p, err
 	}
-	body, err := interpolate(d.Body, e.Variables)
+	body, err := interpolate(d.Body, vars)
 	if err != nil {
 		return p, err
 	}
@@ -322,6 +336,13 @@ func SanitizedDestination(raw string) string {
 	return u.String()
 }
 func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (result Exchange, err error) {
+	d = CloneDraft(d)
+	if d.Variables == nil {
+		d.Variables = map[string]string{}
+	}
+	for name, value := range opts.Variables {
+		d.Variables[name] = value
+	}
 	c := opts.Credentials
 	if c == nil {
 		c = DefaultCredentials
@@ -410,7 +431,7 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if err != nil {
 		return Exchange{}, transportError(ctx, err)
 	}
-	result = Exchange{Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
+	result = Exchange{Draft: true, Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
 	if int64(len(b)) == capBytes {
 		cancel()
 	}

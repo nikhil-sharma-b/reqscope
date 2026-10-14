@@ -358,3 +358,50 @@ access under the same OS account may access the OS store, edit local approvals
 or inspect process memory. Keep that account and the OS credential service
 protected. Automated tests use a controlled store at the OS boundary; macOS
 cross-builds do not substitute for live Keychain acceptance on a Mac.
+
+Saved request cases
+-------------------
+
+A case stores a UUID, display name, request templates, ordinary `variables`, and
+optional `validation` settings. Use an `endpointId` to retain the imported
+endpoint relationship, or supply an independent module/method/URL request.
+Credential inputs stay as opaque `{{secret:NAME}}` references. Saving never
+expands variables or credentials.
+
+```sh
+bin/reqscope case create --project ./my-api --input case.json --preview
+bin/reqscope case create --project ./my-api --input case.json
+bin/reqscope case list --project ./my-api
+bin/reqscope case get CASE_ID --project ./my-api
+bin/reqscope case update --project ./my-api --input edited-case.json
+bin/reqscope case duplicate CASE_ID --project ./my-api --input duplicate.json
+bin/reqscope request send --project ./my-api --env staging --case CASE_ID
+bin/reqscope request send --project ./my-api --env staging --case CASE_ID --input overrides.json
+bin/reqscope case delete CASE_ID --project ./my-api --input deletion.json --preview
+```
+
+`case.json` contains `id`, `name`, and `request`. Updates also require the
+`revision` returned by `case get`. Duplicate input is `{"name":"Copy name"}`;
+delete input is `{"revision":"CURRENT_DIGEST"}`. Overrides input is
+`{"variables":{"item":"run-only value"}}`. All structured inputs accept
+JSON/YAML from files or `--input -`. Names resolve only when unique; UUIDs always
+select their resource. `input-schema list|get|validate` covers case write and
+run inputs. Write previews perform validation without saving or sending.
+Deletion lists referencing scenario files and refuses to leave dangling
+`caseId` references. Scenario authoring adds further reference validation in its
+own ticket.
+
+Request variables resolve from project manifest `variables`, environment
+variables, case/draft variables, then explicit run overrides. Undefined or cyclic
+variables fail before transport. Run overrides never update saved inputs.
+Saved runs include `caseId`; explicit drafts and dirty TUI sends report
+`draft: true`. Optional validation settings are retained, but running a case
+with them currently fails before sending until validation execution is added.
+
+In the TUI, `<leader> c l` lists cases, `c o` opens the selection, `c r` runs it,
+`c d` duplicates it, and `c x` requests deletion. `<leader> c s` saves the visible
+request, opening the case JSON editor for a new case; `c e` edits case metadata
+and inputs. Enter saves the case editor. Leaving or quitting with dirty inputs
+prompts to save, discard, or cancel. Saves check the original revision; a
+conflict preserves the buffer for reconciliation. Unsaved sends use the visible
+draft and keep the saved case unchanged.
