@@ -49,7 +49,7 @@ func schema(name string) (map[string]any, error) {
 		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw", "form", "multipart"}
 	case "case.create", "case.update":
 		draft, _ := schema("request.send")
-		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": map[string]any{"type": "object"}}
+		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": project.ValidationInputSchema()}
 		required = []string{"id", "name", "request"}
 		if name == "case.update" {
 			props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}

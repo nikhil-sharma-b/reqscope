@@ -194,3 +194,93 @@ func TestComposeAnotherEndpointStartsIndependentDraft(t *testing.T) {
 		t.Fatal("compose changed saved case")
 	}
 }
+
+func TestFailedAssertionsVisibleThroughTUIAndCLI(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	calls := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls++; io.WriteString(w, r.URL.Query().Get("value")) }))
+	defer server.Close()
+	root := t.TempDir()
+	s, err := project.Init(root, "Cases", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, _ := s.Resolve("staging")
+	e.BaseURLs["api"] = server.URL
+	if err := project.SaveEnvironment(root, e.Environment, e.Revision, false, false); err != nil {
+		t.Fatal(err)
+	}
+	review, err := project.ReviewAccess(root, "staging")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := project.ApproveAccess(root, review); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.SelectEnvironment(root, e.ID); err != nil {
+		t.Fatal(err)
+	}
+	c, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Runner", Validation: map[string]any{"assertions": []any{map[string]any{"kind": "status-equals", "value": 201}}}, Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/", Query: []project.RequestField{{Name: "value", Value: "{{value}}"}}, Variables: map[string]string{"value": "case input"}}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, diag bytes.Buffer
+	if code := cli.Run([]string{"request", "send", "--project", root, "--env", "staging", "--case", c.ID, "--output", "json"}, strings.NewReader(""), &out, &diag); code != 6 {
+		t.Fatalf("%d %s %s", code, &out, &diag)
+	}
+	if !strings.Contains(out.String(), `"body":"case input"`) || !strings.Contains(out.String(), `"draft":false`) {
+		t.Fatal(out.String())
+	}
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"space", "c", "l", "space", "c"} {
+		key(m, k)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 'r', Text: "r"})
+	if cmd == nil {
+		t.Fatal("case run did not schedule send", m.View().Content)
+	}
+	m.Update(cmd())
+	if !strings.Contains(m.View().Content, "status-equals: failed") || calls != 2 || !strings.Contains(m.View().Content, "case input") || strings.Contains(m.View().Content, "draft inputs") {
+		t.Fatalf("calls=%d %s", calls, m.View().Content)
+	}
+}
+
+func TestTUIAuthorsResponseAssertions(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := project.Init(root, "Assertions", false); err != nil {
+		t.Fatal(err)
+	}
+	c := project.Case{ID: uuid.NewString(), Name: "Checks", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/"}}
+	if _, err := project.SaveCase(root, c, "", false); err != nil {
+		t.Fatal(err)
+	}
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"space", "c", "l", "space", "c", "o", "space", "c", "e"} {
+		key(m, k)
+	}
+	c.Validation = map[string]any{"assertions": []any{map[string]any{"kind": "status-range", "min": 300, "max": 200}}}
+	b, _ := json.Marshal(c)
+	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Text: string(b)})
+	enter(m)
+	saved, err := project.GetCase(root, c.ID)
+	if err != nil || len(saved.Validation) != 0 {
+		t.Fatalf("invalid editor input saved: %+v %v", saved, err)
+	}
+	c.Validation = map[string]any{"assertions": []any{map[string]any{"kind": "status-equals", "value": 200}, map[string]any{"kind": "header-present", "name": "x-test"}, map[string]any{"kind": "json-equals", "pointer": "/nil", "value": nil}}, "responseSchema": true}
+	b, _ = json.Marshal(c)
+	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Text: string(b)})
+	enter(m)
+	saved, err = project.GetCase(root, c.ID)
+	if err != nil || len(saved.Validation) != 2 {
+		t.Fatalf("assertions not saved: %+v %v %s", saved, err, m.View().Content)
+	}
+}

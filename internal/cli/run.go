@@ -149,6 +149,8 @@ func exitCode(err error) int {
 			return 3
 		case "access_denied", "credential_unavailable":
 			return 4
+		case "check_failed":
+			return 6
 		case "transport_error":
 			return 5
 		case "cancelled":

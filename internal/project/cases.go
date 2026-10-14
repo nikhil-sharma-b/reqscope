@@ -52,7 +52,8 @@ func ValidateCase(c Case) error {
 			return Fail("access_denied", "authentication headers require opaque credential references")
 		}
 	}
-	return nil
+	_, err := decodeValidation(c.Validation)
+	return err
 }
 func cases(root string) ([]CaseResource, error) {
 	if _, err := load(root); err != nil {
@@ -229,9 +230,7 @@ func SendCase(ctx context.Context, root, env, selector string, overrides map[str
 	if err != nil {
 		return Exchange{}, err
 	}
-	if len(c.Validation) > 0 {
-		return Exchange{}, Fail("invalid_input", "case validation is not supported yet")
-	}
+	opts.Validation = c.Validation
 	opts.Variables = overrides
 	result, err := Send(ctx, root, env, c.Request, opts)
 	result.CaseID = c.ID

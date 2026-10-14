@@ -468,3 +468,36 @@ also retains it. Successful edits become unsaved draft changes. Invalid JSON
 remains editable with a diagnostic, and sending revalidates all request inputs.
 File-backed bodies and structured forms use the existing request and upload
 editors instead.
+
+Saved cases can include response validation, authored with `case create` or
+`case update` JSON/YAML input, or the TUI's saved case JSON editor:
+
+```json
+"validation": {
+  "assertions": [
+    {"kind": "status-equals", "value": 200},
+    {"kind": "status-range", "min": 200, "max": 299},
+    {"kind": "header-present", "name": "content-type"},
+    {"kind": "header-equals", "name": "x-result", "value": "ok"},
+    {"kind": "json-present", "pointer": "/items/0/id"},
+    {"kind": "json-equals", "pointer": "/active", "value": true}
+  ],
+  "responseSchema": true
+}
+```
+
+JSON Pointers use RFC 6901 escaping and support an empty pointer for the whole
+body. Equality preserves JSON types and distinguishes missing fields from null.
+Header names ignore case; equality checks each repeated header value.
+`responseSchema` selects the endpoint's exact status response, status range,
+or default response, then its response media type. It supports JSON types,
+nullable values, required properties, nested properties and array items, enum,
+const, boolean schemas and additional properties. Other constraints, including
+unresolved references, produce an explicit incomplete result.
+
+Run with `request send --case CASE --env ENV --output json`. Results include
+`transport` and per-check `checks` with `passed`, `failed` or `incomplete`
+outcomes. HTTP 4xx/5xx are completed exchanges. Failed or incomplete checks
+exit with code 6, transport failures with 5, and invalid assertions with 2.
+Truncated or unavailable bodies cannot pass JSON or response schema checks.
+Check diagnostics omit actual and expected values to protect secrets.
