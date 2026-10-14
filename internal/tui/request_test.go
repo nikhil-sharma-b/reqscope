@@ -10,6 +10,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -148,5 +150,64 @@ func TestTUIRunningRequestCanBeCancelled(t *testing.T) {
 	m.Update(<-done)
 	if !strings.Contains(m.View().Content, "request cancelled") {
 		t.Fatal(m.View().Content)
+	}
+}
+
+func TestTUISelectsUploadReferenceAndCLIParity(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	received := make(chan string, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		b, _ := io.ReadAll(r.Body)
+		received <- r.Header.Get("Content-Type") + "\n" + string(b)
+	}))
+	defer server.Close()
+	root := t.TempDir()
+	s, _ := project.Init(root, "Uploads", false)
+	e, _ := s.Resolve("staging")
+	e.BaseURLs["api"] = server.URL
+	project.SaveEnvironment(root, e.Environment, e.Revision, false, false)
+	review, _ := project.ReviewAccess(root, "staging")
+	project.ApproveAccess(root, review)
+	project.SelectEnvironment(root, "staging")
+	path := filepath.Join(root, "a-upload.bin")
+	os.WriteFile(path, []byte{0, 255, 1}, 0600)
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	d := project.RequestDraft{Module: "api", Method: "POST", URL: "/", BodyType: "multipart", Form: []project.FormField{{Name: "tag", Value: "one"}, {Name: "tag", Value: "two"}}}
+	b, _ := json.Marshal(d)
+	for _, k := range []string{"space", "r", "n"} {
+		key(m, k)
+	}
+	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Text: string(b)})
+	enter(m)
+	for _, k := range []string{"space", "r", "f"} {
+		key(m, k)
+	}
+	m.Update(tea.KeyPressMsg{Text: "file"})
+	enter(m)
+	if !strings.Contains(m.View().Content, "a-upload.bin") {
+		t.Fatal(m.View().Content)
+	}
+	key(m, "j")
+	enter(m)
+	for _, k := range []string{"space", "r"} {
+		key(m, k)
+	}
+	_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
+	if cmd == nil {
+		t.Fatal(m.View().Content)
+	}
+	m.Update(cmd())
+	d.Form = append(d.Form, project.FormField{Name: "file", File: path})
+	b, _ = json.Marshal(d)
+	var out, diag bytes.Buffer
+	if code := cli.Run([]string{"request", "send", "--project", root, "--env", "staging", "--input", "-", "--output", "json"}, bytes.NewReader(b), &out, &diag); code != 0 {
+		t.Fatalf("%d %s %s", code, &out, &diag)
+	}
+	if a, b := <-received, <-received; a != b {
+		t.Fatalf("TUI/CLI bytes differ %q %q", a, b)
 	}
 }

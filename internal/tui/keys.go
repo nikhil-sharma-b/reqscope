@@ -36,6 +36,7 @@ func defaults() []Binding {
 		{"open", "Open selection or edit project name", []string{"enter"}}, {"help", "Effective keybindings", []string{"?"}}, {"palette", "Command palette", []string{"<leader> :", ":"}}, {"quit", "Quit", []string{"q", "ctrl+c"}},
 		{"request-new", "New explicit request draft", []string{"<leader> r n"}},
 		{"request-compose", "Compose selected contract request", []string{"<leader> r c"}},
+		{"request-upload", "Select a local upload file reference", []string{"<leader> r f"}},
 		{"request-edit", "Edit current request draft", []string{"<leader> r e"}},
 		{"request-reset", "Clear current request draft", []string{"<leader> r x"}},
 		{"request-send", "Send current request", []string{"<leader> r s"}},

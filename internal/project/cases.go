@@ -40,7 +40,7 @@ func ValidateCase(c Case) error {
 	if d.EndpointID == "" && (d.Module == "" || d.Method == "" || d.URL == "") {
 		return Fail("invalid_input", "case request requires endpointId or module, method and url")
 	}
-	if d.BodyType != "" && d.BodyType != "raw" && d.BodyType != "json" {
+	if !SupportedBodyType(d.BodyType) {
 		return Fail("invalid_input", "unsupported body type")
 	}
 	if d.TimeoutMS < 0 || d.TimeoutMS > 86400000 || d.MaxBodyBytes < 0 || d.MaxBodyBytes > 1<<30 || d.MaxRedirects != nil && *d.MaxRedirects < 0 {

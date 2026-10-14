@@ -60,6 +60,12 @@ func ContractDraft(root, id string) (RequestDraft, []GuidedField, error) {
 				if example == nil {
 					example = object(p["schema"])["example"]
 				}
+				if in == "formData" {
+					in = "form"
+					if p["type"] == "file" || object(p["items"])["type"] == "file" {
+						in = "file"
+					}
+				}
 				fields = append(fields, GuidedField{name, in, required || in == "path", description, example})
 			}
 			rb := object(ep.Operation["requestBody"])
@@ -74,7 +80,44 @@ func ContractDraft(root, id string) (RequestDraft, []GuidedField, error) {
 						d.ContentType = "application/json"
 						d.BodyType = "json"
 					}
-					fields = append(fields, GuidedField{"body", "body", required, description, object(content[d.ContentType])["example"]})
+					if d.ContentType == "application/x-www-form-urlencoded" || d.ContentType == "multipart/form-data" {
+						d.BodyType = "form"
+						if d.ContentType == "multipart/form-data" {
+							d.BodyType = "multipart"
+						}
+						fields = append(fields, guidedFormFields(object(object(content[d.ContentType])["schema"]))...)
+					} else {
+						fields = append(fields, GuidedField{"body", "body", required, description, object(content[d.ContentType])["example"]})
+					}
+				}
+			}
+			if rb == nil {
+				consumes := ep.Operation["consumes"]
+				if consumes == nil {
+					consumes = ep.Context["consumes"]
+				}
+				for _, media := range anyList(consumes) {
+					if media == "multipart/form-data" || media == "application/x-www-form-urlencoded" {
+						d.ContentType = fmt.Sprint(media)
+						d.BodyType = "form"
+						if media == "multipart/form-data" {
+							d.BodyType = "multipart"
+						}
+						break
+					}
+				}
+			}
+			if rb == nil && d.BodyType == "raw" {
+				for _, f := range fields {
+					if f.In == "file" {
+						d.BodyType = "multipart"
+						d.ContentType = "multipart/form-data"
+						break
+					}
+					if f.In == "form" {
+						d.BodyType = "form"
+						d.ContentType = "application/x-www-form-urlencoded"
+					}
 				}
 			}
 			return d, fields, nil
@@ -98,7 +141,7 @@ func serializeContract(ep Endpoint, path map[string]string, query url.Values, he
 			values = query[name]
 		case "header":
 			values = headers.Values(name)
-		case "body":
+		case "body", "formData":
 			continue
 		default:
 			return Fail("invalid_input", "unsupported parameter location %q", in)
@@ -233,6 +276,14 @@ func validateContractBody(ep Endpoint, body, contentType string) error {
 		}
 	}
 	if rb == nil {
+		for _, p := range contractParameters(ep) {
+			if p["in"] == "formData" && p["required"] == true {
+				media := strings.Split(contentType, ";")[0]
+				if media != "application/x-www-form-urlencoded" && media != "multipart/form-data" {
+					return Fail("invalid_input", "missing required form body")
+				}
+			}
+		}
 		return nil
 	}
 	required, _ := rb["required"].(bool)
@@ -303,4 +354,27 @@ func validateBodyValue(v any, s map[string]any, path string) error {
 		}
 	}
 	return nil
+}
+
+func guidedFormFields(schema map[string]any) []GuidedField {
+	required := map[string]bool{}
+	for _, name := range anyList(schema["required"]) {
+		required[fmt.Sprint(name)] = true
+	}
+	properties := object(schema["properties"])
+	fields := []GuidedField{}
+	for _, name := range keys(properties) {
+		p := object(properties[name])
+		in := "form"
+		items := p
+		if p["type"] == "array" {
+			items = object(p["items"])
+		}
+		if items["format"] == "binary" || items["type"] == "file" {
+			in = "file"
+		}
+		description, _ := p["description"].(string)
+		fields = append(fields, GuidedField{name, in, required[name], description, p["example"]})
+	}
+	return fields
 }

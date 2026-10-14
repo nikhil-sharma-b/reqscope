@@ -30,9 +30,10 @@ func schema(name string) (map[string]any, error) {
 	switch name {
 	case "request.send":
 		props = map[string]any{}
-		for _, name := range []string{"endpointId", "module", "method", "url", "body", "bodyType", "contentType"} {
+		for _, name := range []string{"endpointId", "module", "method", "url", "body", "bodyType", "contentType", "bodyFile"} {
 			props[name] = map[string]any{"type": "string"}
 		}
+		props["form"] = map[string]any{"type": "array", "items": map[string]any{"type": "object", "additionalProperties": false, "required": []string{"name"}, "properties": map[string]any{"name": map[string]any{"type": "string", "minLength": 1}, "value": map[string]any{"type": "string"}, "file": map[string]any{"type": "string"}, "contentType": map[string]any{"type": "string"}}}}
 		props["variables"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 		props["path"] = map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 		field := map[string]any{"type": "object", "additionalProperties": false, "properties": map[string]any{"name": map[string]any{"type": "string"}, "value": map[string]any{"type": "string"}}, "required": []string{"name", "value"}}
@@ -45,7 +46,7 @@ func schema(name string) (map[string]any, error) {
 		required = []string{}
 		props["timeoutMs"].(map[string]any)["maximum"] = 86400000
 		props["maxBodyBytes"].(map[string]any)["maximum"] = 1073741824
-		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw"}
+		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw", "form", "multipart"}
 	case "case.create", "case.update":
 		draft, _ := schema("request.send")
 		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": map[string]any{"type": "object"}}
@@ -103,7 +104,7 @@ func validateInput(name string, b []byte) (any, error) {
 		if d.TimeoutMS < 0 || d.TimeoutMS > 86400000 || d.MaxBodyBytes < 0 || d.MaxBodyBytes > 1073741824 || d.MaxRedirects != nil && *d.MaxRedirects < 0 {
 			return nil, project.Fail("invalid_input", "invalid request limits")
 		}
-		if d.BodyType != "" && d.BodyType != "json" && d.BodyType != "raw" {
+		if !project.SupportedBodyType(d.BodyType) {
 			return nil, project.Fail("invalid_input", "unsupported body type")
 		}
 		return d, nil
