@@ -519,7 +519,7 @@ func validateContractFields(value any, location string) error {
 				}
 				valid := func(x any) bool {
 					t, ok := x.(string)
-					return ok && (t == "object" || t == "array" || t == "string" || t == "number" || t == "integer" || t == "boolean" || t == "null")
+					return ok && (t == "file" && value["in"] == "formData" || t == "object" || t == "array" || t == "string" || t == "number" || t == "integer" || t == "boolean" || t == "null")
 				}
 				if a, ok := v.([]any); ok {
 					for _, t := range a {
@@ -530,13 +530,13 @@ func validateContractFields(value any, location string) error {
 				} else if !valid(v) {
 					return Fail("invalid_input", "invalid schema type at %s", path)
 				}
-			case "properties", "responses", "content":
+			case "properties", "responses", "content", "encoding":
 				if object(v) == nil {
 					return Fail("invalid_input", "%s must be an object", path)
 				}
 			}
 			// Property names, media types and response codes are user-defined keys.
-			if key == "properties" || key == "schemas" || key == "definitions" || key == "responses" || key == "content" {
+			if key == "properties" || key == "schemas" || key == "definitions" || key == "responses" || key == "content" || key == "encoding" {
 				for _, name := range keys(object(v)) {
 					if err := validateContractFields(object(v)[name], path+"/"+name); err != nil {
 						return err

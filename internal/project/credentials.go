@@ -348,6 +348,20 @@ func validateCredentials(root, env string, review AccessReview, req *http.Reques
 			}
 		}
 	}
+	if d.BodyType == "form" || d.BodyType == "multipart" {
+		for _, f := range d.Form {
+			if strings.Contains(f.ContentType, "{{secret:") {
+				return Fail("access_denied", "secrets are forbidden in form control fields")
+			}
+			if err := checkSecretPosition(items, review, credentialPosition{Destination: req.URL.String(), Module: d.Module, In: "body"}, f.Value); err != nil {
+				return err
+			}
+		}
+		return nil
+	}
+	if d.BodyFile != "" {
+		return nil
+	}
 	body, _ := ioRequestBody(req)
 	return checkSecretPosition(items, review, credentialPosition{Destination: req.URL.String(), Module: d.Module, In: "body"}, body)
 }
@@ -411,6 +425,28 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 		q[name] = values
 	}
 	p.request.URL.RawQuery = q.Encode()
+	if p.draft.BodyType == "form" || p.draft.BodyType == "multipart" {
+		fields := append([]preparedFormField(nil), p.form...)
+		for i := range fields {
+			if fields[i].File != "" {
+				continue
+			}
+			fields[i].Value, err = expand(fields[i].Value, false)
+			if err != nil {
+				return nil, err
+			}
+		}
+		body, ct, err := encodeForm(fields, p.draft.BodyType, p.request.Header.Get("Content-Type"))
+		if err != nil {
+			return nil, err
+		}
+		setRequestBody(p.request, body)
+		p.request.Header.Set("Content-Type", ct)
+		return used, nil
+	}
+	if p.draft.BodyFile != "" {
+		return used, nil
+	}
 	body, err := ioRequestBody(p.request)
 	if err != nil {
 		return nil, err

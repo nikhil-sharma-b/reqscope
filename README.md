@@ -252,11 +252,11 @@ Supported contract parameter rules are scalar and array form query parameters,
 space/pipe-delimited query arrays, simple path/header parameters, and Swagger 2
 collection formats. Supply array elements as repeated query/header entries;
 path arrays use a serialized string. Unsupported object parameters, cookie
-parameters, label/matrix styles and form/upload bodies fail before connecting.
+parameters, label/matrix styles and unsupported form encodings fail before connecting.
 Required parameters, scalar types/enums, required body properties and basic JSON
 body types are checked. This is not full JSON Schema validation. Examples remain
-separate suggestions and never regenerate body content. JSON and raw string
-bodies are supported; optional `contentType` sets the media type.
+separate suggestions and never regenerate body content. JSON, raw string/file, URL-encoded form and multipart bodies are supported;
+optional `contentType` sets the media type.
 
 Environment `{{variables}}` expand in URL, path values, query/header values and
 body. Undefined variables fail before connecting. `timeoutMs`, `maxRedirects`
@@ -405,3 +405,48 @@ and inputs. Enter saves the case editor. Leaving or quitting with dirty inputs
 prompts to save, discard, or cancel. Saves check the original revision; a
 conflict preserves the buffer for reconciliation. Unsaved sends use the visible
 draft and keep the saved case unchanged.
+
+### Form bodies and local uploads
+
+Use `bodyType: "form"` for URL-encoded values or `bodyType: "multipart"` for
+values and files. The `form` array preserves repeated field names. Each entry
+has `name` and either `value` or `file`, with an optional multipart `contentType`.
+For example, save this input as `upload.json`:
+
+```json
+{
+  "module": "api",
+  "method": "POST",
+  "url": "/upload",
+  "bodyType": "multipart",
+  "form": [
+    {"name": "tag", "value": "one"},
+    {"name": "tag", "value": "two"},
+    {"name": "attachment", "file": "fixtures/sample.bin", "contentType": "application/octet-stream"}
+  ]
+}
+```
+
+Send it with `reqscope request send --project ./my-api --env staging --input upload.json`.
+Relative upload paths resolve from the project root. Absolute paths are also
+accepted. Paths must be explicit, without variable or credential references.
+Saved cases retain paths and never store uploaded bytes. Raw binary bodies use
+`bodyType: "raw"` and `bodyFile` instead of `body`.
+
+In the TUI, compose a contract request or edit the JSON draft, then press
+`Space r f` to choose a file reference. Enter the field name, use `j/k` to move,
+`Enter` to open a directory or select a file, and `h` to visit the parent directory.
+Raw bodies use the selected file as `bodyFile`. Multipart bodies add the reference
+to `form`. JSON draft editing also supports repeated file entries.
+
+OpenAPI form schemas guide required fields and file references. Supported array
+encodings include `form` with `explode` and Swagger `collectionFormat` values
+`multi`, `csv`, `ssv`, `pipes`, and `tsv`. Nested objects and unsupported encoding
+rules fail before sending. Missing, unreadable, or nonregular files fail before
+network access. Upload bytes are read into memory with a 32 MiB combined limit.
+
+The runner generates multipart boundaries and preserves file bytes. Production
+confirmation includes a digest of those bytes, so changing a file requires a new
+confirmation. Protected body credential references expand in form values before
+encoding and follow the existing destination bindings. File bytes are opaque and
+never expanded as templates. Response output uses the existing sanitizer.

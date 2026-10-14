@@ -48,6 +48,10 @@ type Model struct {
 	requestBaseline   string
 	requestText       string
 	requestFields     []project.GuidedField
+	uploadName        string
+	uploadDir         string
+	uploadEntries     []os.DirEntry
+	uploadIndex       int
 	prepared          project.PreparedRequest
 	requestCancel     context.CancelFunc
 	exchange          project.Exchange

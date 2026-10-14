@@ -16,7 +16,16 @@ type RequestField struct {
 	Name  string `json:"name" yaml:"name"`
 	Value string `json:"value" yaml:"value"`
 }
+type FormField struct {
+	Name        string `json:"name" yaml:"name"`
+	Value       string `json:"value,omitempty" yaml:"value,omitempty"`
+	File        string `json:"file,omitempty" yaml:"file,omitempty"`
+	ContentType string `json:"contentType,omitempty" yaml:"contentType,omitempty"`
+}
+
 type RequestDraft struct {
+	Form         []FormField       `json:"form,omitempty" yaml:"form,omitempty"`
+	BodyFile     string            `json:"bodyFile,omitempty" yaml:"bodyFile,omitempty"`
 	Variables    map[string]string `json:"variables,omitempty" yaml:"variables,omitempty"`
 	EndpointID   string            `json:"endpointId,omitempty" yaml:"endpointId,omitempty"`
 	Module       string            `json:"module" yaml:"module"`
@@ -48,6 +57,7 @@ type PreparedRequest struct {
 	request        *http.Request
 	review         AccessReview
 	draft          RequestDraft
+	form           []preparedFormField
 }
 type Exchange struct {
 	CaseID        string      `json:"caseId,omitempty"`
@@ -268,8 +278,8 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	if err != nil {
 		return p, err
 	}
-	if d.BodyType != "" && d.BodyType != "json" && d.BodyType != "raw" {
-		return p, Fail("invalid_input", "supported body types are json and raw")
+	if !SupportedBodyType(d.BodyType) {
+		return p, Fail("invalid_input", "unsupported body type")
 	}
 	if d.BodyType == "json" && body != "" {
 		if !json.Valid([]byte(body)) {
@@ -279,7 +289,37 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 			d.ContentType = "application/json"
 		}
 	}
+	form, err := prepareForm(root, d, vars, endpoint)
+	if err != nil {
+		return p, err
+	}
+	if d.BodyFile != "" {
+		if d.BodyType != "raw" || body != "" || len(d.Form) > 0 {
+			return p, Fail("invalid_input", "bodyFile requires an exclusive raw body")
+		}
+		b, err := readUpload(root, d.BodyFile)
+		if err != nil {
+			return p, err
+		}
+		body = string(b)
+	}
+	if d.BodyType == "form" || d.BodyType == "multipart" {
+		if d.ContentType == "" {
+			d.ContentType = headers.Get("Content-Type")
+		}
+		if body != "" || d.BodyFile != "" {
+			return p, Fail("invalid_input", "form bodies cannot include raw body input")
+		}
+		body, d.ContentType, err = encodeForm(form, d.BodyType, d.ContentType)
+		if err != nil {
+			return p, err
+		}
+	}
 	if endpoint != nil {
+		media := strings.TrimSpace(strings.Split(d.ContentType, ";")[0])
+		if (media == "application/x-www-form-urlencoded" || media == "multipart/form-data") && d.BodyType != "form" && d.BodyType != "multipart" {
+			return p, Fail("invalid_input", "contract forms require structured form input")
+		}
 		if err = validateContractBody(*endpoint, body, d.ContentType); err != nil {
 			return p, err
 		}
@@ -314,7 +354,14 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 			}
 		}
 	}
-	if err := validateCredentials(root, env, r, req, d); err != nil {
+	credentialDraft := d
+	if d.BodyType == "form" || d.BodyType == "multipart" {
+		credentialDraft.Form = make([]FormField, len(form))
+		for i, f := range form {
+			credentialDraft.Form[i] = f.FormField
+		}
+	}
+	if err := validateCredentials(root, env, r, req, credentialDraft); err != nil {
 		return p, err
 	}
 	data, _ := json.Marshal(struct {
@@ -322,7 +369,7 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 		URL, Body, Grant string
 		Header           http.Header
 	}{d, u.String(), body, r.Fingerprint, headers})
-	p = PreparedRequest{Method: method, URL: SanitizedDestination(u.String()), Classification: r.Classification, Fingerprint: Digest(data), request: req, review: r, draft: d}
+	p = PreparedRequest{Method: method, URL: SanitizedDestination(u.String()), Classification: r.Classification, Fingerprint: Digest(data), request: req, review: r, draft: d, form: form}
 	return p, nil
 }
 func SanitizedDestination(raw string) string {
