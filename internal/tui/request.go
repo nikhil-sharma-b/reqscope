@@ -58,6 +58,8 @@ func (m *Model) requestAction(action string) (bool, tea.Cmd) {
 		}
 		m.overlay = "upload-name"
 		m.mode = "INSERT"
+	case "request-editor":
+		return true, m.openExternalEditor()
 	case "request-edit":
 		m.overlay = "request-edit"
 		m.mode = "INSERT"

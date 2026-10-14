@@ -450,3 +450,21 @@ confirmation includes a digest of those bytes, so changing a file requires a new
 confirmation. Protected body credential references expand in form values before
 encoding and follow the existing destination bindings. File bytes are opaque and
 never expanded as templates. Response output uses the existing sanitizer.
+
+## External body editor
+
+Use `Space r o` or the `request-editor` command to edit the current inline raw
+or JSON body. Reqscope uses `$VISUAL`, then `$EDITOR`, then `vi`. Editor settings
+may include arguments, such as `code --wait`. The editor must wait until editing
+finishes before it exits.
+
+The scratch file contains only the unexpanded body, including variable and
+secret references. Registered credential values are rejected before export.
+Reqscope creates a private temporary directory and a file readable only by its
+owner, and removes the directory after the editor returns, including failures.
+The current case, draft and mode remain selected. A nonzero editor exit,
+including cancellation, retains the previous buffer. Exiting without changes
+also retains it. Successful edits become unsaved draft changes. Invalid JSON
+remains editable with a diagnostic, and sending revalidates all request inputs.
+File-backed bodies and structured forms use the existing request and upload
+editors instead.
