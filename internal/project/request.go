@@ -44,6 +44,7 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
+	Validation   map[string]any
 	Variables    map[string]string
 	Credentials  *Credentials
 	Interactive  bool
@@ -60,18 +61,20 @@ type PreparedRequest struct {
 	form           []preparedFormField
 }
 type Exchange struct {
-	CaseID        string      `json:"caseId,omitempty"`
-	Draft         bool        `json:"draft"`
-	Method        string      `json:"method"`
-	Destination   string      `json:"destination"`
-	Status        int         `json:"status"`
-	DurationMS    int64       `json:"durationMs"`
-	Headers       http.Header `json:"headers"`
-	Body          string      `json:"body"`
-	RetainedBytes int         `json:"retainedBytes"`
-	Binary        bool        `json:"binary"`
-	BodyWithheld  bool        `json:"bodyWithheld,omitempty"`
-	Truncated     bool        `json:"truncated"`
+	Transport     string        `json:"transport"`
+	Checks        []CheckResult `json:"checks"`
+	CaseID        string        `json:"caseId,omitempty"`
+	Draft         bool          `json:"draft"`
+	Method        string        `json:"method"`
+	Destination   string        `json:"destination"`
+	Status        int           `json:"status"`
+	DurationMS    int64         `json:"durationMs"`
+	Headers       http.Header   `json:"headers"`
+	Body          string        `json:"body"`
+	RetainedBytes int           `json:"retainedBytes"`
+	Binary        bool          `json:"binary"`
+	BodyWithheld  bool          `json:"bodyWithheld,omitempty"`
+	Truncated     bool          `json:"truncated"`
 }
 
 func interpolate(raw string, vars map[string]string) (string, error) {
@@ -383,6 +386,26 @@ func SanitizedDestination(raw string) string {
 	return u.String()
 }
 func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (result Exchange, err error) {
+	v, err := decodeValidation(opts.Validation)
+	if err != nil {
+		return result, err
+	}
+	var endpoint *Endpoint
+	if v.ResponseSchema && d.EndpointID != "" {
+		specs, e := Specifications(root)
+		if e != nil {
+			return result, e
+		}
+		for _, spec := range specs {
+			for _, ep := range spec.Endpoints {
+				if ep.ID == d.EndpointID {
+					copy := ep
+					endpoint = &copy
+				}
+			}
+		}
+	}
+	result.Transport = "not-started"
 	d = CloneDraft(d)
 	if d.Variables == nil {
 		d.Variables = map[string]string{}
@@ -471,14 +494,14 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	start := time.Now()
 	response, err := client.Do(p.request.WithContext(ctx))
 	if err != nil {
-		return Exchange{}, transportError(ctx, err)
+		return Exchange{Transport: "failed"}, transportError(ctx, err)
 	}
 	defer response.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(response.Body, capBytes))
 	if err != nil {
-		return Exchange{}, transportError(ctx, err)
+		return Exchange{Transport: "failed"}, transportError(ctx, err)
 	}
-	result = Exchange{Draft: true, Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
+	result = Exchange{Transport: "completed", Draft: true, Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
 	if int64(len(b)) == capBytes {
 		cancel()
 	}
@@ -487,7 +510,13 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if !result.Binary {
 		result.Body = string(b)
 	}
+	result.Checks = responseChecks(result, v, endpoint)
 	c.sanitizeExchange(&result, used)
+	for _, check := range result.Checks {
+		if check.Outcome != "passed" {
+			return result, Fail("check_failed", "Response checks failed or are incomplete")
+		}
+	}
 	return result, nil
 }
 func transportError(ctx context.Context, err error) error {

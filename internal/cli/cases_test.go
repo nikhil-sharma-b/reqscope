@@ -79,3 +79,32 @@ func TestSavedRunRejectsNonStringVariables(t *testing.T) {
 		}
 	}
 }
+
+func TestCLIAuthorsAndRejectsResponseAssertions(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := project.Init(root, "Assertions", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, tt := range []struct {
+		validation string
+		code       int
+	}{
+		{`{"assertions":[{"kind":"status-equals","value":200},{"kind":"header-present","name":"x-test"},{"kind":"json-equals","pointer":"/nil","value":null}],"responseSchema":true}`, 0},
+		{`{"assertions":[{"kind":"status-range","min":300,"max":200}]}`, 2},
+		{`{"assertions":[{"kind":"json-present","pointer":"/~2"}]}`, 2},
+		{`{"assertions":[{"kind":"header-equals","name":"x-test","value":12}]}`, 2},
+		{`{"assertions":[{"kind":"unknown"}]}`, 2},
+		{`{"responseSchema":"true"}`, 2},
+		{`{"assertions":null}`, 2},
+		{`{"assertions":[{"kind":"json-present","pointer":null}]}`, 2},
+		{`{"assertions":[{"kind":"status-equals","value":200,"min":0}]}`, 2},
+	} {
+		body := `{"id":"` + uuid.NewString() + `","name":"Checks","request":{"module":"api","method":"GET","url":"/"},"validation":` + tt.validation + `}`
+		var out, diag bytes.Buffer
+		code := cli.Run([]string{"case", "create", "--input", "-", "--project", root, "--output", "json"}, strings.NewReader(body), &out, &diag)
+		if code != tt.code {
+			t.Fatalf("%s: %d %s", tt.validation, code, &out)
+		}
+	}
+}

@@ -184,13 +184,15 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.requestCancel()
 			m.requestCancel = nil
 		}
-		if msg.err != nil {
-			m.status = msg.err.Error()
-		} else {
+		if msg.result.Status != 0 {
 			m.exchange = msg.result
 			m.pane = responsePane
 			m.query = ""
 			m.index = 0
+		}
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
 			m.status = "HTTP exchange completed"
 		}
 		return m, nil
