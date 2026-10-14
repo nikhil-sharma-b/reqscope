@@ -44,11 +44,12 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
-	Validation   map[string]any
-	Variables    map[string]string
-	Credentials  *Credentials
-	Interactive  bool
-	Confirmation string
+	confirmRedirect func(context.Context, PreparedRequest) (string, error)
+	Validation      map[string]any
+	Variables       map[string]string
+	Credentials     *Credentials
+	Interactive     bool
+	Confirmation    string
 }
 type PreparedRequest struct {
 	Method         string `json:"method"`
@@ -486,6 +487,31 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		}
 		if current.Fingerprint != p.review.Fingerprint {
 			return Fail("access_denied", "environment changed during execution")
+		}
+		if opts.Interactive && current.Classification == "production" {
+			if opts.confirmRedirect == nil {
+				return Fail("access_denied", "production redirects require individual confirmation")
+			}
+			data, _ := json.Marshal(struct {
+				Method, URL, Access, Initial string
+				Headers                      http.Header
+			}{req.Method, req.URL.String(), current.Fingerprint, p.Fingerprint, req.Header})
+			redirect := PreparedRequest{Method: req.Method, URL: c.Sanitize(SanitizedDestination(req.URL.String())), Classification: current.Classification, Fingerprint: Digest(data)}
+			confirmation, err := opts.confirmRedirect(ctx, redirect)
+			if err != nil {
+				return err
+			}
+			if confirmation != redirect.Fingerprint {
+				return Fail("access_denied", "production redirect requires confirmation of the current request")
+			}
+			// Authorization may have changed while waiting for the user's response.
+			current, err = requestAccess(root, env, p.draft.Module, req.URL.String(), opts.Interactive)
+			if err != nil {
+				return err
+			}
+			if current.Fingerprint != p.review.Fingerprint {
+				return Fail("access_denied", "environment changed during redirect confirmation")
+			}
 		}
 		items, err := credentialItems(root, env)
 		if err != nil {

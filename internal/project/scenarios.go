@@ -368,6 +368,7 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 		sendOpts.Validation = input.source.Validation
 		sendOpts.Credentials = c
 		sendOpts.Confirmation = ""
+		sendOpts.confirmRedirect = opts.Confirm
 		d := CloneDraft(input.source.Request)
 		// A contract snapshot is used for construction and checks; access stays live.
 		var stepErr error

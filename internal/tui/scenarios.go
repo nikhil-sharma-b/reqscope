@@ -36,6 +36,10 @@ func (m *Model) scenarioAction(action string) (bool, tea.Cmd) {
 	}
 	switch action {
 	case "scenario-create":
+		if m.requestCancel != nil {
+			m.status = "Cancel the running request or scenario first"
+			return true, nil
+		}
 		m.scenarioDraft = project.ScenarioResource{Scenario: project.Scenario{ID: uuid.NewString(), Name: "New scenario", Steps: []project.ScenarioStep{}}}
 		b, _ := json.Marshal(m.scenarioDraft.Scenario)
 		m.scenarioText = string(b)

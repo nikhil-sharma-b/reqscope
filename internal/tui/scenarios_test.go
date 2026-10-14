@@ -184,6 +184,10 @@ func TestScenarioTUICancelsActiveTransport(t *testing.T) {
 	case <-time.After(3 * time.Second):
 		t.Fatal("transport not started")
 	}
+	scenarioKeys(m, "space", "s", "n")
+	if strings.Contains(m.View().Content, "Edit scenario JSON") {
+		t.Fatal("creation allowed during active execution")
+	}
 	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
 	select {
 	case msg := <-done:
@@ -193,5 +197,86 @@ func TestScenarioTUICancelsActiveTransport(t *testing.T) {
 	}
 	if calls.Load() != 1 || !strings.Contains(m.View().Content, "scenario cancelled") {
 		t.Fatal(m.View().Content)
+	}
+}
+
+func TestSharedCaseTUIShowsAffectedScenariosBeforeSaving(t *testing.T) {
+	root, c, _ := scenarioTUIWorkspace(t, "http://localhost:12345", "staging")
+	s := project.Scenario{ID: uuid.NewString(), Name: "Affected", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}
+	if _, err := project.SaveScenario(root, s, "", false); err != nil {
+		t.Fatal(err)
+	}
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
+	for _, k := range []string{"space", "c", "l", "space", "c", "o", "space", "c", "e"} {
+		key(m, k)
+	}
+	if !strings.Contains(m.View().Content, "Affected scenarios:") || !strings.Contains(m.View().Content, "scenarios/") {
+		t.Fatal(m.View().Content)
+	}
+	c.Name = "Changed"
+	b, _ := json.Marshal(c.Case)
+	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
+	m.Update(tea.KeyPressMsg{Text: string(b)})
+	enter(m)
+	if !strings.Contains(m.View().Content, "Confirm shared case edit?") {
+		t.Fatal(m.View().Content)
+	}
+	before, _ := project.GetCase(root, c.ID)
+	if before.Name == "Changed" {
+		t.Fatal("shared edit saved before preview")
+	}
+	key(m, "y")
+	after, _ := project.GetCase(root, c.ID)
+	if after.Name != "Changed" {
+		t.Fatal("confirmed shared case edit not saved", m.View().Content)
+	}
+}
+
+func TestScenarioTUIConfirmsProductionRedirectBeforeContact(t *testing.T) {
+	var calls atomic.Int32
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls.Add(1)
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/redirected?token=sensitive", http.StatusFound)
+		} else {
+			io.WriteString(w, `{}`)
+		}
+	}))
+	defer server.Close()
+	root, c, _ := scenarioTUIWorkspace(t, server.URL, "production")
+	s := project.Scenario{ID: uuid.NewString(), Name: "Redirect", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}
+	if _, err := project.SaveScenario(root, s, "", false); err != nil {
+		t.Fatal(err)
+	}
+	m, _ := tui.New(root, tui.KeyConfig{})
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
+	for _, k := range []string{"space", "e", "l", "j", "space", "e", "s"} {
+		key(m, k)
+	}
+	cmd := scenarioTUIStart(t, m)
+	m.Update(cmd())
+	_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
+	m.Update(cmd())
+	if calls.Load() != 1 || !strings.Contains(m.View().Content, "Confirm production scenario send?") || !strings.Contains(m.View().Content, "/redirected") || strings.Contains(m.View().Content, "token=") {
+		t.Fatalf("unconfirmed redirect calls=%d %s", calls.Load(), m.View().Content)
+	}
+	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	m.Update(cmd())
+	if calls.Load() != 1 || !strings.Contains(m.View().Content, "scenario cancelled") {
+		t.Fatalf("cancelled redirect contacted destination: %d %s", calls.Load(), m.View().Content)
+	}
+	key(m, "esc")
+	cmd = scenarioTUIStart(t, m)
+	m.Update(cmd())
+	for i := 0; i < 2; i++ {
+		_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
+		m.Update(cmd())
+	}
+	if calls.Load() != 3 || !strings.Contains(m.View().Content, "Successful: true") {
+		t.Fatalf("approved redirect failed %d %s", calls.Load(), m.View().Content)
 	}
 }
