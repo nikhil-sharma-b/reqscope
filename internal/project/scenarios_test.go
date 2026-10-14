@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -77,7 +78,10 @@ func TestScenarioFailurePoliciesAndDependentSkips(t *testing.T) {
 		for _, continued := range []bool{false, true} {
 			t.Run(cause+map[bool]string{false: "/fail-fast", true: "/continue"}[continued], func(t *testing.T) {
 				var paths []string
+				var pathMu sync.Mutex
 				server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+					pathMu.Lock()
+					defer pathMu.Unlock()
 					paths = append(paths, r.URL.Path)
 					if cause == "transport" && r.URL.Path == "/producer" {
 						h, _, _ := w.(http.Hijacker).Hijack()
@@ -109,6 +113,8 @@ func TestScenarioFailurePoliciesAndDependentSkips(t *testing.T) {
 				}
 				s := scenarioSave(t, root, []project.ScenarioStep{{ID: "producer", CaseID: producer.ID, Extracts: map[string]string{"value": pointer}}, {ID: "dependent", CaseID: dependent.ID, Bindings: map[string]project.ScenarioBinding{"item": {StepID: "producer", Extract: "value"}}}, {ID: "independent", CaseID: independent.ID}}, continued)
 				report, err := project.RunScenario(context.Background(), root, "staging", s.ID, project.ScenarioOptions{})
+				pathMu.Lock()
+				defer pathMu.Unlock()
 				var pe *project.Error
 				if !errors.As(err, &pe) || pe.Code != "scenario_failed" || report.Successful || len(report.Steps) != 3 || report.Steps[0].Outcome != "failed" || report.Steps[1].Outcome != "skipped" {
 					t.Fatalf("%+v %v", report, err)
@@ -336,6 +342,39 @@ func TestScenarioProductionConfirmationFailureEndsContinuedRun(t *testing.T) {
 		return "", project.Fail("access_denied", "confirmation unavailable")
 	}})
 	if err == nil || report.Successful || confirmations != 1 || calls != 0 || report.Steps[1].Outcome != "skipped" {
+		t.Fatalf("%+v %v confirmations=%d calls=%d", report, err, confirmations, calls)
+	}
+}
+
+func TestScenarioRedirectConfirmationFailureEndsContinuedRun(t *testing.T) {
+	calls := 0
+	confirmations := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls++
+		if r.URL.Path == "/" {
+			http.Redirect(w, r, "/done", http.StatusFound)
+		} else {
+			io.WriteString(w, `{}`)
+		}
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	workspace, _ := project.Load(root)
+	env, _ := workspace.Resolve("production")
+	env.BaseURLs["api"] = server.URL
+	if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
+		t.Fatal(err)
+	}
+	c := scenarioCase(t, root, "/")
+	s := scenarioSave(t, root, []project.ScenarioStep{{ID: "one", CaseID: c.ID}, {ID: "two", CaseID: c.ID}}, true)
+	report, err := project.RunScenario(context.Background(), root, "production", s.ID, project.ScenarioOptions{SendOptions: project.SendOptions{Interactive: true}, Confirm: func(_ context.Context, p project.PreparedRequest) (string, error) {
+		confirmations++
+		if confirmations == 2 {
+			return "", project.Fail("access_denied", "confirmation unavailable")
+		}
+		return p.Fingerprint, nil
+	}})
+	if err == nil || report.Successful || confirmations != 2 || calls != 1 || report.Steps[1].Outcome != "skipped" {
 		t.Fatalf("%+v %v confirmations=%d calls=%d", report, err, confirmations, calls)
 	}
 }

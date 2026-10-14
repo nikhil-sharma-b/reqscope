@@ -368,11 +368,17 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 		sendOpts.Validation = input.source.Validation
 		sendOpts.Credentials = c
 		sendOpts.Confirmation = ""
-		sendOpts.confirmRedirect = opts.Confirm
 		d := CloneDraft(input.source.Request)
 		// A contract snapshot is used for construction and checks; access stays live.
 		var stepErr error
 		confirmationFailed := false
+		if opts.Confirm != nil {
+			sendOpts.confirmRedirect = func(ctx context.Context, p PreparedRequest) (string, error) {
+				fingerprint, err := opts.Confirm(ctx, p)
+				confirmationFailed = err != nil || fingerprint != p.Fingerprint
+				return fingerprint, err
+			}
+		}
 		p, e := prepareScenarioRequest(root, env, d, sendOpts, input.endpoint)
 		if e != nil {
 			stepErr = e
@@ -381,7 +387,7 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 				stepErr = Fail("access_denied", "production scenario send requires per-step confirmation")
 			} else {
 				sendOpts.Confirmation, stepErr = opts.Confirm(ctx, p)
-				confirmationFailed = stepErr != nil
+				confirmationFailed = stepErr != nil || sendOpts.Confirmation != p.Fingerprint
 			}
 		}
 		if stepErr == nil {

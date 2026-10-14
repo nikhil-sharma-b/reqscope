@@ -133,7 +133,7 @@ JSON stdout contains exactly one envelope with `schemaVersion`, `success`, `data
 | 3 | Missing or ambiguous resource, or revision conflict |
 | 4 | Access or credential denial |
 | 5 | Transport failure |
-| 6 | Failed assertion/validation or unsuccessful scenario, reserved for execution |
+| 6 | Failed assertion/validation or unsuccessful scenario |
 | 7 | Storage or internal failure |
 | 130 | Cancellation |
 
@@ -388,8 +388,7 @@ JSON/YAML from files or `--input -`. Names resolve only when unique; UUIDs alway
 select their resource. `input-schema list|get|validate` covers case write and
 run inputs. Write previews perform validation without saving or sending.
 Deletion lists referencing scenario files and refuses to leave dangling
-`caseId` references. Scenario authoring adds further reference validation in its
-own ticket.
+`caseId` references. Scenario authoring validates case references when resources are saved.
 
 Request variables resolve from project manifest `variables`, environment
 variables, case/draft variables, then explicit run overrides. Undefined or cyclic
