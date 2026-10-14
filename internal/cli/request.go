@@ -23,13 +23,11 @@ func requestCommand(o options, in io.Reader) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			var v struct {
-				Variables map[string]string `json:"variables" yaml:"variables"`
-			}
-			if err := project.Decode(b, &v); err != nil {
+			value, err := validateInput("case.run", b)
+			if err != nil {
 				return nil, err
 			}
-			overrides = v.Variables
+			overrides = value.(CaseRunInput).Variables
 		}
 		if o.module != "" || o.url != "" || o.method != "" {
 			return nil, project.Fail("invalid_input", "saved runs accept variable overrides only")

@@ -64,3 +64,18 @@ func TestCaseCLIStdinFilePreviewAndAmbiguousNames(t *testing.T) {
 		}
 	}
 }
+
+func TestSavedRunRejectsNonStringVariables(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := project.Init(root, "Cases", false); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"input-schema", "validate", "case.run"}, {"request", "send", "--env", "staging", "--case", "any"}} {
+		var out, diag bytes.Buffer
+		args = append(args, "--project", root, "--output", "json", "--input", "-")
+		if code := cli.Run(args, strings.NewReader("variables: {count: 123}"), &out, &diag); code != 2 || !strings.Contains(out.String(), "invalid_input") {
+			t.Fatalf("%d %s %s", code, &out, &diag)
+		}
+	}
+}

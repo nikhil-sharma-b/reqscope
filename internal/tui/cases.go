@@ -18,7 +18,9 @@ func (m *Model) caseItems() []project.CaseResource {
 	}
 	return result
 }
-func (m *Model) requestDirty() bool { return m.requestText != m.requestBaseline || m.caseMetadataDirty }
+func (m *Model) requestDirty() bool {
+	return m.requestText != m.requestBaseline || m.caseMetadataDirty || m.overlay == "case-edit" && m.caseText != m.caseTextBaseline
+}
 func (m *Model) clearCaseDraft() {
 	m.caseDraft = project.CaseResource{}
 	m.caseMetadataDirty = false
@@ -85,12 +87,7 @@ func (m *Model) caseAction(action string) (bool, tea.Cmd) {
 				m.status = err.Error()
 				return true, nil
 			}
-			m.caseDraft = current
-			b, _ := json.Marshal(current.Request)
-			m.requestText = string(b)
-			m.requestBaseline = m.requestText
-			m.caseMetadataDirty = false
-			m.requestFields = nil
+			m.loadCaseDraft(current)
 			m.pane = requestPane
 			m.query = ""
 			m.index = 0
@@ -109,6 +106,7 @@ func (m *Model) caseAction(action string) (bool, tea.Cmd) {
 			m.caseMetadataDirty = true
 			b, _ := json.Marshal(m.caseDraft.Case)
 			m.caseText = string(b)
+			m.caseTextBaseline = m.caseText
 			m.overlay = "case-edit"
 			m.mode = "INSERT"
 		} else {
@@ -127,6 +125,7 @@ func (m *Model) caseAction(action string) (bool, tea.Cmd) {
 		c.Request = d
 		b, _ := json.Marshal(c)
 		m.caseText = string(b)
+		m.caseTextBaseline = m.caseText
 		m.overlay = "case-edit"
 		m.mode = "INSERT"
 	default:
@@ -220,4 +219,13 @@ func (m *Model) caseOverlay() string {
 		return "Unsaved request/case changes\ns save | d discard | c cancel\n" + m.status
 	}
 	return ""
+}
+
+func (m *Model) loadCaseDraft(c project.CaseResource) {
+	m.caseDraft = c
+	b, _ := json.Marshal(c.Request)
+	m.requestText = string(b)
+	m.requestBaseline = m.requestText
+	m.caseMetadataDirty = false
+	m.requestFields = nil
 }

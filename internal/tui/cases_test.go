@@ -11,6 +11,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -133,5 +135,62 @@ func TestSavedCaseRunsIdenticallyThroughTUIAndCLI(t *testing.T) {
 	m.Update(cmd())
 	if calls != 2 || !strings.Contains(m.View().Content, "case input") || strings.Contains(m.View().Content, "draft inputs") {
 		t.Fatalf("calls=%d %s", calls, m.View().Content)
+	}
+}
+
+func TestComposeAnotherEndpointStartsIndependentDraft(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := project.Init(root, "Cases", false); err != nil {
+		t.Fatal(err)
+	}
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	contract := "openapi: 3.0.3\ninfo: {title: API, version: '1'}\npaths:\n  /first:\n    get:\n      responses: {'200': {description: OK}}\n  /second:\n    get:\n      responses: {'200': {description: OK}}\n"
+	if err := os.WriteFile(file, []byte(contract), 0600); err != nil {
+		t.Fatal(err)
+	}
+	spec, err := project.ImportSpecification(root, file, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	firstID := ""
+	secondID := ""
+	for _, ep := range spec.Endpoints {
+		if ep.Path == "/first" {
+			firstID = ep.ID
+		} else {
+			secondID = ep.ID
+		}
+	}
+	d, _, err := project.ContractDraft(root, firstID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	source, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Original", Request: d}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, k := range []string{"space", "c", "l", "space", "c", "o", "g", "e", "j", "space", "r", "c"} {
+		key(m, k)
+	}
+	if !strings.Contains(m.View().Content, secondID) {
+		t.Fatal("compose retained previous endpoint", m.View().Content)
+	}
+	enter(m)
+	for _, k := range []string{"space", "c", "s"} {
+		key(m, k)
+	}
+	enter(m)
+	items, err := project.Cases(root)
+	if err != nil || len(items) != 2 {
+		t.Fatalf("%+v %v %s", items, err, m.View().Content)
+	}
+	current, _ := project.GetCase(root, source.ID)
+	if current.Request.EndpointID != firstID || current.Revision != source.Revision {
+		t.Fatal("compose changed saved case")
 	}
 }

@@ -5,7 +5,6 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"context"
-	"encoding/json"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
@@ -44,6 +43,7 @@ type Model struct {
 	caseDraft         project.CaseResource
 	caseDelete        project.CaseResource
 	caseText          string
+	caseTextBaseline  string
 	caseMetadataDirty bool
 	requestBaseline   string
 	requestText       string
@@ -203,10 +203,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 							if m.requestDirty() {
 								m.status = "Case changed externally. Draft retained; reconcile or discard before saving."
 							} else {
-								m.caseDraft = current
-								b, _ := json.Marshal(current.Request)
-								m.requestText = string(b)
-								m.requestBaseline = m.requestText
+								m.loadCaseDraft(current)
 							}
 						}
 					}

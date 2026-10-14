@@ -21,12 +21,7 @@ func (m *Model) requestAction(action string) (bool, tea.Cmd) {
 			m.status = "Cancel the running request first"
 			return true, nil
 		}
-		if m.requestText != "" {
-			m.overlay = "request-edit"
-			m.mode = "INSERT"
-			m.pane = requestPane
-			return true, nil
-		}
+		m.clearCaseDraft()
 		d := project.RequestDraft{Method: "GET", BodyType: "raw", Path: map[string]string{}}
 		if action == "request-compose" {
 			matches := project.SearchEndpoints(m.specs, project.EndpointQuery{Query: m.endpointQuery, Method: m.methodFilter, GroupByTag: m.groupTags})

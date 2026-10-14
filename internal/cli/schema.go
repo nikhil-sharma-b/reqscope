@@ -143,9 +143,7 @@ func validateInput(name string, b []byte) (any, error) {
 		}
 		return v, nil
 	case "case.run":
-		var v struct {
-			Variables map[string]string `json:"variables" yaml:"variables"`
-		}
+		var v CaseRunInput
 		if err := project.Decode(b, &v); err != nil {
 			return nil, err
 		}

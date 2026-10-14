@@ -12,6 +12,9 @@ type CaseInput struct {
 type CaseDuplicateInput struct {
 	Name string `json:"name" yaml:"name"`
 }
+type CaseRunInput struct {
+	Variables map[string]string `json:"variables" yaml:"variables"`
+}
 type CaseDeleteInput struct {
 	Revision string `json:"revision" yaml:"revision"`
 }
