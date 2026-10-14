@@ -52,8 +52,7 @@ func (m *Model) requestAction(action string) (bool, tea.Cmd) {
 		m.pane = requestPane
 	case "request-reset":
 		if m.requestCancel == nil {
-			m.requestText = ""
-			m.requestFields = nil
+			m.clearCaseDraft()
 			m.status = "Request draft cleared"
 		}
 	case "request-send":
@@ -85,6 +84,10 @@ func (m *Model) prepareSend() tea.Cmd {
 		m.status = err.Error()
 		return nil
 	}
+	if len(m.caseDraft.Validation) > 0 {
+		m.status = "Case validation is not supported yet"
+		return nil
+	}
 	p, err := project.PrepareRequestWithCredentials(m.root, m.activeEnvironment, d, true, m.credentials)
 	if err != nil {
 		m.status = err.Error()
@@ -104,8 +107,11 @@ func (m *Model) startSend(d project.RequestDraft, confirmation string) tea.Cmd {
 	m.status = "Sending request | Esc or request cancel stops transport"
 	m.overlay = ""
 	root, env := m.root, m.activeEnvironment
+	caseID, draft := m.caseDraft.ID, m.requestDirty() || m.caseDraft.ID == ""
 	return func() tea.Msg {
 		result, err := project.Send(ctx, root, env, d, project.SendOptions{Interactive: true, Confirmation: confirmation, Credentials: m.credentials})
+		result.CaseID = caseID
+		result.Draft = draft
 		return exchangeMsg{result, err}
 	}
 }
@@ -172,7 +178,14 @@ func (m *Model) responseLines() []string {
 		return []string{"No response recorded"}
 	}
 	b, _ := json.Marshal(m.exchange.Headers)
-	lines := []string{fmt.Sprintf("HTTP %d | %d ms | %d retained bytes | binary=%t truncated=%t", m.exchange.Status, m.exchange.DurationMS, m.exchange.RetainedBytes, m.exchange.Binary, m.exchange.Truncated), string(b)}
+	identity := "Draft"
+	if m.exchange.CaseID != "" {
+		identity = "Case " + m.exchange.CaseID
+	}
+	if m.exchange.Draft {
+		identity += " | draft inputs"
+	}
+	lines := []string{identity, fmt.Sprintf("HTTP %d | %d ms | %d retained bytes | binary=%t truncated=%t", m.exchange.Status, m.exchange.DurationMS, m.exchange.RetainedBytes, m.exchange.Binary, m.exchange.Truncated), string(b)}
 	if m.exchange.BodyWithheld {
 		lines = append(lines, "Body withheld: structured authentication data could not be safely sanitized")
 	} else if m.exchange.Binary {

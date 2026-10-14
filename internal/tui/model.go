@@ -5,6 +5,7 @@ import (
 	tea "charm.land/bubbletea/v2"
 	"charm.land/lipgloss/v2"
 	"context"
+	"encoding/json"
 	"fmt"
 	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
@@ -39,6 +40,12 @@ type Model struct {
 	credentials       *project.Credentials
 	credentialEntry   [7]string
 	credentialField   int
+	savedCases        []project.CaseResource
+	caseDraft         project.CaseResource
+	caseDelete        project.CaseResource
+	caseText          string
+	caseMetadataDirty bool
+	requestBaseline   string
 	requestText       string
 	requestFields     []project.GuidedField
 	prepared          project.PreparedRequest
@@ -93,6 +100,10 @@ func NewWithCredentials(root string, c KeyConfig, credentials *project.Credentia
 		}
 		m.snapshot = s
 		m.specs, err = project.Specifications(root)
+		if err != nil {
+			return nil, err
+		}
+		m.savedCases, err = project.Cases(root)
 		if err != nil {
 			return nil, err
 		}
@@ -184,6 +195,25 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snapshot.Environments = msg.snapshot.Environments
 		} else if !m.dirty {
 			m.snapshot = msg.snapshot
+			if cases, err := project.Cases(m.root); err == nil {
+				m.savedCases = cases
+				if m.caseDraft.ID != "" {
+					for _, current := range cases {
+						if current.ID == m.caseDraft.ID && current.Revision != m.caseDraft.Revision {
+							if m.requestDirty() {
+								m.status = "Case changed externally. Draft retained; reconcile or discard before saving."
+							} else {
+								m.caseDraft = current
+								b, _ := json.Marshal(current.Request)
+								m.requestText = string(b)
+								m.requestBaseline = m.requestText
+							}
+						}
+					}
+				}
+			} else {
+				m.status = err.Error()
+			}
 			if specs, err := project.Specifications(m.root); err == nil {
 				m.specs = specs
 			} else {
@@ -201,6 +231,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.caseKey(msg); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.requestKey(msg); handled {
 		return m, cmd
 	}
@@ -471,6 +504,24 @@ func edit(s string, msg tea.KeyPressMsg) string {
 	return s
 }
 func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
+	if m.requestDirty() {
+		leaving := false
+		switch action {
+		case "quit", "reload", "discard", "request-reset", "case-open", "case-run", "request-new", "request-compose", "pane-left", "pane-right", "project", "environments", "endpoints", "request", "response", "history", "cases", "scenarios", "schemas", "endpoint-search", "rename", "import":
+			leaving = true
+		case "open":
+			leaving = m.pane == casesPane
+		}
+		if leaving {
+			m.overlay = "case-leave"
+			m.nextAction = action
+			m.nextCount = n
+			return m, nil
+		}
+	}
+	if handled, cmd := m.caseAction(action); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.requestAction(action); handled {
 		return m, cmd
 	}
@@ -648,6 +699,12 @@ func (m *Model) reload() {
 		return
 	}
 	m.snapshot = s
+	if cases, err := project.Cases(m.root); err == nil {
+		m.savedCases = cases
+	} else {
+		m.status = err.Error()
+		return
+	}
 	specs, err := project.Specifications(m.root)
 	if err != nil {
 		m.status = err.Error()
@@ -667,6 +724,13 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
+	if m.pane == casesPane {
+		labels := []string{}
+		for _, c := range m.caseItems() {
+			labels = append(labels, c.Name+" | "+c.Request.EndpointID)
+		}
+		return labels
+	}
 	if m.pane == responsePane {
 		return m.responseLines()
 	}
@@ -781,6 +845,16 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		if m.overlay == "request-confirm" {
 			body = "Review the sanitized destination in the confirmation"
 		}
+		if m.requestText != "" {
+			label := "Draft"
+			if m.caseDraft.ID != "" {
+				label = "Case: " + m.caseDraft.Name
+			}
+			if m.requestDirty() {
+				label += " | unsaved"
+			}
+			body = label + "\n" + body
+		}
 		if body == "" {
 			body = "No request selected | request new or compose"
 		}
@@ -792,6 +866,16 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		body = "No runs recorded"
 	case casesPane:
 		body = "No cases saved"
+		if items := m.caseItems(); len(items) > 0 {
+			body = ""
+			for i, c := range items {
+				mark := "  "
+				if i == m.index {
+					mark = "> "
+				}
+				body += mark + c.Name + " | endpoint " + c.Request.EndpointID + "\n"
+			}
+		}
 	case scenariosPane:
 		body = "No scenarios saved"
 	}
@@ -803,7 +887,7 @@ func (m *Model) View() tea.View {
 	}
 	width, height := m.width, m.height
 	dirty := ""
-	if m.dirty {
+	if m.dirty || m.requestDirty() {
 		dirty = " *unsaved"
 	}
 	header := fmt.Sprintf("Reqscope | %s%s | %s | %s", m.draft, dirty, m.mode, panes[m.pane])
@@ -845,6 +929,9 @@ func (m *Model) View() tea.View {
 	}
 	if requestOverlay := m.requestOverlay(); requestOverlay != "" {
 		overlay = requestOverlay
+	}
+	if caseOverlay := m.caseOverlay(); caseOverlay != "" {
+		overlay = caseOverlay
 	}
 	if sourceOverlay := m.sourceImportOverlay(); sourceOverlay != "" {
 		overlay = sourceOverlay

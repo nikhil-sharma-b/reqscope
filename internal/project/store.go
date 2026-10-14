@@ -18,6 +18,7 @@ type Change struct {
 	Path             string `json:"path"`
 	ExpectedRevision string `json:"expectedRevision"`
 	Content          []byte `json:"content"`
+	Delete           bool   `json:"delete,omitempty"`
 }
 type transaction struct {
 	Version int      `json:"version"`
@@ -134,7 +135,7 @@ func allowedPath(path string) bool {
 	if path == "reqscope.yaml" {
 		return true
 	}
-	if filepath.Dir(path) == "specs" && filepath.Ext(path) == ".yaml" {
+	if (filepath.Dir(path) == "specs" || filepath.Dir(path) == "cases") && filepath.Ext(path) == ".yaml" {
 		return validID(strings.TrimSuffix(filepath.Base(path), ".yaml"))
 	}
 	return filepath.Dir(path) == "environments" && filepath.Ext(path) == ".yaml" && validID(path[len("environments/"):len(path)-len(".yaml")])
@@ -146,6 +147,12 @@ func validateChanges(changes []Change) error {
 			return Fail("invalid_input", "invalid or duplicate resource path %q", c.Path)
 		}
 		seen[c.Path] = true
+		if c.Delete {
+			if filepath.Dir(c.Path) != "cases" || c.ExpectedRevision == "" || len(c.Content) != 0 {
+				return Fail("invalid_input", "invalid resource deletion")
+			}
+			continue
+		}
 		if c.Path == "reqscope.yaml" {
 			var m Manifest
 			if err := Decode(c.Content, &m); err != nil {
@@ -153,6 +160,17 @@ func validateChanges(changes []Change) error {
 			}
 			if err := validateManifest(m); err != nil {
 				return err
+			}
+		} else if filepath.Dir(c.Path) == "cases" {
+			var value Case
+			if err := Decode(c.Content, &value); err != nil {
+				return err
+			}
+			if err := ValidateCase(value); err != nil {
+				return err
+			}
+			if filepath.Base(c.Path) != value.ID+".yaml" {
+				return Fail("invalid_input", "case filename must match ID")
 			}
 		} else if filepath.Dir(c.Path) == "specs" {
 			var spec Specification
@@ -210,11 +228,20 @@ func recoverTransaction(root string) error {
 		if readErr == nil {
 			revision = Digest(current)
 		}
-		if revision != c.ExpectedRevision && revision != Digest(c.Content) {
+		if revision != c.ExpectedRevision && !(c.Delete && readErr != nil) && !(!c.Delete && revision == Digest(c.Content)) {
 			return Fail("revision_conflict", "%s changed during interrupted transaction; reconcile it with %s before retrying", c.Path, journalName)
 		}
 	}
 	for _, c := range tx.Changes {
+		if c.Delete {
+			if err := os.Remove(filepath.Join(root, c.Path)); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return err
+			}
+			if err := syncDir(filepath.Join(root, filepath.Dir(c.Path))); err != nil {
+				return err
+			}
+			continue
+		}
 		if err = atomicWrite(filepath.Join(root, c.Path), c.Content); err != nil {
 			return err
 		}
@@ -232,6 +259,15 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 		return err
 	}
 	for _, c := range changes {
+		if c.Delete {
+			references, err := caseReferences(root, strings.TrimSuffix(filepath.Base(c.Path), ".yaml"))
+			if err != nil {
+				return err
+			}
+			if len(references) > 0 {
+				return Fail("invalid_input", "case deletion blocked: %s", strings.Join(references, ", "))
+			}
+		}
 		if err := safePath(root, c.Path); err != nil {
 			return err
 		}
@@ -242,7 +278,7 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 		if (err == nil && c.ExpectedRevision != Digest(b)) || (errors.Is(err, os.ErrNotExist) && c.ExpectedRevision != "") {
 			return Fail("revision_conflict", "%s changed or already exists; inspect and retry with its current revision", c.Path)
 		}
-		if err == nil {
+		if err == nil && !c.Delete {
 			if c.Path == "reqscope.yaml" {
 				var old, next Manifest
 				if err := Decode(b, &old); err != nil {
@@ -254,7 +290,7 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 				if old.ID != next.ID {
 					return Fail("invalid_input", "project ID is immutable")
 				}
-			} else {
+			} else if filepath.Dir(c.Path) == "environments" {
 				var old, next Environment
 				if err := Decode(b, &old); err != nil {
 					return err
