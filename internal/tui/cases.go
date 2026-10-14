@@ -29,6 +29,22 @@ func (m *Model) clearCaseDraft() {
 	m.requestFields = nil
 }
 func (m *Model) saveCaseDraft() bool {
+	if m.caseDraft.ID != "" {
+		refs, err := project.CaseReferences(m.root, m.caseDraft.ID)
+		if err != nil {
+			m.status = err.Error()
+			return false
+		}
+		if len(refs) > 0 {
+			m.overlay = "case-impact"
+			m.mode = "NORMAL"
+			m.status = "Affected scenarios: " + strings.Join(refs, ", ")
+			return false
+		}
+	}
+	return m.saveCaseDraftConfirmed()
+}
+func (m *Model) saveCaseDraftConfirmed() bool {
 	var d project.RequestDraft
 	if err := project.Decode([]byte(m.requestText), &d); err != nil {
 		m.status = err.Error()
@@ -135,6 +151,22 @@ func (m *Model) caseAction(action string) (bool, tea.Cmd) {
 }
 func (m *Model) caseKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch m.overlay {
+	case "case-impact":
+		if msg.String() == "esc" || msg.String() == "c" {
+			m.overlay = ""
+			m.nextAction = ""
+		}
+		if msg.String() == "y" && m.saveCaseDraftConfirmed() {
+			m.overlay = ""
+			m.mode = "NORMAL"
+			if m.nextAction != "" {
+				action, n := m.nextAction, m.nextCount
+				m.nextAction = ""
+				_, cmd := m.action(action, n)
+				return true, cmd
+			}
+		}
+		return true, nil
 	case "case-edit":
 		switch msg.String() {
 		case "ctrl+u":
@@ -211,8 +243,10 @@ func (m *Model) caseKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 }
 func (m *Model) caseOverlay() string {
 	switch m.overlay {
+	case "case-impact":
+		return "Confirm shared case edit?\n" + m.status + "\ny save | Esc cancel"
 	case "case-edit":
-		return "Edit saved case JSON | Ctrl+u clear | Enter save | Esc cancel editing\n" + m.caseText + "\n" + m.status
+		return "Affected scenarios: " + strings.Join(m.caseDraft.References, ", ") + "\nEdit saved case JSON | Ctrl+u clear | Enter save | Esc cancel editing\n" + m.caseText + "\n" + m.status
 	case "case-delete":
 		return fmt.Sprintf("Delete case %s?\nReferences will be checked before deletion.\ny delete | Esc cancel\n%s", m.caseDelete.Name, m.status)
 	case "case-leave":

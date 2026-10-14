@@ -21,7 +21,7 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run"}
+var schemaNames = []string{"project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
@@ -47,6 +47,22 @@ func schema(name string) (map[string]any, error) {
 		props["timeoutMs"].(map[string]any)["maximum"] = 86400000
 		props["maxBodyBytes"].(map[string]any)["maximum"] = 1073741824
 		props["bodyType"].(map[string]any)["enum"] = []string{"", "json", "raw", "form", "multipart"}
+	case "scenario.create", "scenario.update":
+		ordinary := map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
+		binding := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"stepId", "extract"}, "properties": map[string]any{"stepId": str, "extract": str}}
+		step := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "caseId"}, "properties": map[string]any{"id": str, "caseId": map[string]any{"type": "string", "format": "uuid"}, "overrides": ordinary, "extracts": ordinary, "bindings": map[string]any{"type": "object", "additionalProperties": binding}}}
+		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "continueOnFailure": map[string]any{"type": "boolean"}, "steps": map[string]any{"type": "array", "minItems": 1, "items": step}}
+		required = []string{"id", "name", "steps"}
+		if name == "scenario.update" {
+			props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
+			required = append(required, "revision")
+		}
+	case "scenario.delete":
+		props = map[string]any{"revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+		required = []string{"revision"}
+	case "scenario.run":
+		props = map[string]any{"variables": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
+		required = []string{}
 	case "case.create", "case.update":
 		draft, _ := schema("request.send")
 		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": project.ValidationInputSchema()}
@@ -113,6 +129,37 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "scenario.create", "scenario.update":
+		var v ScenarioInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		if err := project.ValidateScenario(v.Scenario); err != nil {
+			return nil, err
+		}
+		if name == "scenario.update" && !validRevision(v.Revision) {
+			return nil, project.Fail("invalid_input", "update requires revision from scenario get")
+		}
+		if name == "scenario.create" && v.Revision != "" {
+			return nil, project.Fail("invalid_input", "create does not accept revision")
+		}
+		return v, nil
+	case "scenario.delete":
+		var v CaseDeleteInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		if !validRevision(v.Revision) {
+			return nil, project.Fail("invalid_input", "delete requires revision from scenario get")
+		}
+		return v, nil
+	case "scenario.run":
+		var v CaseRunInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+
 	case "case.create", "case.update":
 		var v CaseInput
 		if err := project.Decode(b, &v); err != nil {

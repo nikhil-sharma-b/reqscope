@@ -31,6 +31,10 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   case create|update --input FILE|- [--preview]
   case duplicate|delete ID_OR_NAME --input FILE|- [--preview]
   request send --env ID_OR_NAME --case ID_OR_NAME [--input OVERRIDES_FILE|-]
+  scenario list|get ID_OR_NAME
+  scenario create|update --input FILE|- [--preview]
+  scenario delete ID_OR_NAME --input FILE|- [--preview]
+  scenario validate|run ID_OR_NAME [--env ID_OR_NAME]
   secret list|inspect --env ID_OR_NAME
   access inspect --env ID_OR_NAME
   environment list|get ID_OR_NAME
@@ -149,7 +153,7 @@ func exitCode(err error) int {
 			return 3
 		case "access_denied", "credential_unavailable":
 			return 4
-		case "check_failed":
+		case "check_failed", "scenario_failed":
 			return 6
 		case "transport_error":
 			return 5
@@ -292,6 +296,9 @@ func execute(o options, in io.Reader) (any, error) {
 	group, action := o.args[0], o.args[1]
 	if group == "secret" || group == "access" {
 		return credentialCommand(o)
+	}
+	if group == "scenario" {
+		return scenarioCommand(o, in)
 	}
 	if group == "case" {
 		return caseCommand(o, in)

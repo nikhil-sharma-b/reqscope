@@ -44,11 +44,12 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
-	Validation   map[string]any
-	Variables    map[string]string
-	Credentials  *Credentials
-	Interactive  bool
-	Confirmation string
+	confirmRedirect func(context.Context, PreparedRequest) (string, error)
+	Validation      map[string]any
+	Variables       map[string]string
+	Credentials     *Credentials
+	Interactive     bool
+	Confirmation    string
 }
 type PreparedRequest struct {
 	Method         string `json:"method"`
@@ -158,6 +159,9 @@ func PrepareRequestWithCredentials(root, env string, d RequestDraft, interactive
 	return p, c.SanitizeError(err)
 }
 func prepareRequest(root, env string, d RequestDraft, interactive bool) (PreparedRequest, error) {
+	return prepareRequestSnapshot(root, env, d, interactive, nil, false)
+}
+func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, endpoint *Endpoint, snapshot bool) (PreparedRequest, error) {
 	var p PreparedRequest
 	if !interactive && strings.TrimSpace(env) == "" {
 		return p, Fail("access_denied", "every CLI network run requires explicit --env")
@@ -180,17 +184,18 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 	for name, value := range d.Variables {
 		vars[name] = value
 	}
-	var endpoint *Endpoint
 	if d.EndpointID != "" {
-		specs, err := Specifications(root)
-		if err != nil {
-			return p, err
-		}
-		for _, spec := range specs {
-			for _, ep := range spec.Endpoints {
-				if ep.ID == d.EndpointID {
-					copy := ep
-					endpoint = &copy
+		if !snapshot {
+			specs, err := Specifications(root)
+			if err != nil {
+				return p, err
+			}
+			for _, spec := range specs {
+				for _, ep := range spec.Endpoints {
+					if ep.ID == d.EndpointID {
+						copy := ep
+						endpoint = &copy
+					}
 				}
 			}
 		}
@@ -386,12 +391,14 @@ func SanitizedDestination(raw string) string {
 	return u.String()
 }
 func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions) (result Exchange, err error) {
+	return send(ctx, root, env, d, opts, nil, false)
+}
+func send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions, endpoint *Endpoint, snapshot bool) (result Exchange, err error) {
 	v, err := decodeValidation(opts.Validation)
 	if err != nil {
 		return result, err
 	}
-	var endpoint *Endpoint
-	if v.ResponseSchema && d.EndpointID != "" {
+	if !snapshot && v.ResponseSchema && d.EndpointID != "" {
 		specs, e := Specifications(root)
 		if e != nil {
 			return result, e
@@ -418,7 +425,15 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		c = DefaultCredentials
 	}
 	defer func() { err = c.SanitizeError(err) }()
-	p, err := PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
+	var p PreparedRequest
+	if snapshot {
+		if err = c.Refresh(root); err == nil {
+			p, err = prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true)
+			p.URL = c.Sanitize(p.URL)
+		}
+	} else {
+		p, err = PrepareRequestWithCredentials(root, env, d, opts.Interactive, c)
+	}
 	if err != nil {
 		return Exchange{}, err
 	}
@@ -472,6 +487,31 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		}
 		if current.Fingerprint != p.review.Fingerprint {
 			return Fail("access_denied", "environment changed during execution")
+		}
+		if opts.Interactive && current.Classification == "production" {
+			if opts.confirmRedirect == nil {
+				return Fail("access_denied", "production redirects require individual confirmation")
+			}
+			data, _ := json.Marshal(struct {
+				Method, URL, Access, Initial string
+				Headers                      http.Header
+			}{req.Method, req.URL.String(), current.Fingerprint, p.Fingerprint, req.Header})
+			redirect := PreparedRequest{Method: req.Method, URL: c.Sanitize(SanitizedDestination(req.URL.String())), Classification: current.Classification, Fingerprint: Digest(data)}
+			confirmation, err := opts.confirmRedirect(ctx, redirect)
+			if err != nil {
+				return err
+			}
+			if confirmation != redirect.Fingerprint {
+				return Fail("access_denied", "production redirect requires confirmation of the current request")
+			}
+			// Authorization may have changed while waiting for the user's response.
+			current, err = requestAccess(root, env, p.draft.Module, req.URL.String(), opts.Interactive)
+			if err != nil {
+				return err
+			}
+			if current.Fingerprint != p.review.Fingerprint {
+				return Fail("access_denied", "environment changed during redirect confirmation")
+			}
 		}
 		items, err := credentialItems(root, env)
 		if err != nil {

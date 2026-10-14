@@ -20,8 +20,9 @@ type Case struct {
 	Validation map[string]any `json:"validation,omitempty" yaml:"validation,omitempty"`
 }
 type CaseResource struct {
-	Case     `yaml:",inline"`
-	Revision string `json:"revision" yaml:"-"`
+	Case       `yaml:",inline"`
+	Revision   string   `json:"revision" yaml:"-"`
+	References []string `json:"references" yaml:"-"`
 }
 type CaseDeletion struct {
 	ID         string   `json:"id"`
@@ -85,7 +86,7 @@ func cases(root string) ([]CaseResource, error) {
 		if filepath.Base(path) != c.ID+".yaml" {
 			return nil, Fail("invalid_input", "case filename must match its immutable ID")
 		}
-		result = append(result, CaseResource{c, Digest(b)})
+		result = append(result, CaseResource{Case: c, Revision: Digest(b)})
 	}
 	sort.Slice(result, func(i, j int) bool {
 		if result[i].Name != result[j].Name {
@@ -125,7 +126,12 @@ func GetCase(root, selector string) (CaseResource, error) {
 	if err != nil {
 		return CaseResource{}, err
 	}
-	return resolveCase(items, selector)
+	result, err := resolveCase(items, selector)
+	if err != nil {
+		return result, err
+	}
+	result.References, err = CaseReferences(root, result.ID)
+	return result, err
 }
 func saveCase(root string, c Case, revision string, preview bool) (CaseResource, error) {
 	if err := ValidateCase(c); err != nil {
@@ -166,8 +172,12 @@ func writeCase(root string, c Case, revision string, preview bool) (CaseResource
 	if err != nil {
 		return CaseResource{}, err
 	}
+	refs, err := caseReferences(root, c.ID)
+	if err != nil {
+		return CaseResource{}, err
+	}
 	err = commit(root, []Change{{Path: filepath.Join("cases", c.ID+".yaml"), ExpectedRevision: revision, Content: b}}, preview)
-	return CaseResource{c, Digest(b)}, err
+	return CaseResource{Case: c, Revision: Digest(b), References: refs}, err
 }
 func SaveCase(root string, c Case, revision string, preview bool) (CaseResource, error) {
 	var result CaseResource

@@ -36,6 +36,13 @@ var panes = []string{"Project", "Environments", "Endpoints", "Request", "Respons
 var actionPanes = map[string]paneID{"project": projectPane, "environments": environmentsPane, "endpoints": endpointsPane, "request": requestPane, "response": responsePane, "history": historyPane, "cases": casesPane, "scenarios": scenariosPane}
 
 type Model struct {
+	savedScenarios    []project.ScenarioResource
+	scenarioDraft     project.ScenarioResource
+	scenarioText      string
+	scenarioReport    project.ScenarioReport
+	scenarioEvents    chan tea.Msg
+	scenarioApprovals chan scenarioApproval
+
 	credentials       *project.Credentials
 	credentialEntry   [7]string
 	credentialField   int
@@ -104,6 +111,10 @@ func NewWithCredentials(root string, c KeyConfig, credentials *project.Credentia
 		}
 		m.snapshot = s
 		m.specs, err = project.Specifications(root)
+		if err != nil {
+			return nil, err
+		}
+		m.savedScenarios, err = project.Scenarios(root)
 		if err != nil {
 			return nil, err
 		}
@@ -176,6 +187,26 @@ func (m *Model) poll() tea.Cmd {
 func (m *Model) Init() tea.Cmd { return m.poll() }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case scenarioPromptMsg:
+		m.prepared = msg.request
+		m.overlay = "scenario-confirm"
+		m.mode = "NORMAL"
+		return m, nil
+	case scenarioFinishedMsg:
+		if m.requestCancel != nil {
+			m.requestCancel()
+			m.requestCancel = nil
+		}
+		m.scenarioEvents = nil
+		m.scenarioApprovals = nil
+		m.scenarioReport = msg.report
+		m.overlay = "scenario-report"
+		if msg.err != nil {
+			m.status = msg.err.Error()
+		} else {
+			m.status = "Scenario completed"
+		}
+		return m, nil
 	case editorFinishedMsg:
 		m.finishExternalEditor(msg)
 		return m, nil
@@ -204,6 +235,7 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.snapshot.Environments = msg.snapshot.Environments
 		} else if !m.dirty {
 			m.snapshot = msg.snapshot
+			m.savedScenarios, _ = project.Scenarios(m.root)
 			if cases, err := project.Cases(m.root); err == nil {
 				m.savedCases = cases
 				if m.caseDraft.ID != "" {
@@ -237,6 +269,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	return m, nil
 }
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
+	if handled, cmd := m.scenarioKey(msg); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.caseKey(msg); handled {
 		return m, cmd
 	}
@@ -525,6 +560,9 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if handled, cmd := m.scenarioAction(action); handled {
+		return m, cmd
+	}
 	if handled, cmd := m.caseAction(action); handled {
 		return m, cmd
 	}
@@ -705,6 +743,7 @@ func (m *Model) reload() {
 		return
 	}
 	m.snapshot = s
+	m.savedScenarios, _ = project.Scenarios(m.root)
 	if cases, err := project.Cases(m.root); err == nil {
 		m.savedCases = cases
 	} else {
@@ -730,6 +769,13 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
+	if m.pane == scenariosPane {
+		labels := []string{}
+		for _, s := range m.scenarioItems() {
+			labels = append(labels, s.Name)
+		}
+		return labels
+	}
 	if m.pane == casesPane {
 		labels := []string{}
 		for _, c := range m.caseItems() {
@@ -884,6 +930,16 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		}
 	case scenariosPane:
 		body = "No scenarios saved"
+		if items := m.scenarioItems(); len(items) > 0 {
+			body = ""
+			for i, s := range items {
+				mark := "  "
+				if i == m.index {
+					mark = "> "
+				}
+				body += mark + s.Name + "\n"
+			}
+		}
 	}
 	return fit(m.credentials.Sanitize(title+"\n"+body), max(1, width), max(1, height))
 }
@@ -938,6 +994,9 @@ func (m *Model) View() tea.View {
 	}
 	if caseOverlay := m.caseOverlay(); caseOverlay != "" {
 		overlay = caseOverlay
+	}
+	if scenarioOverlay := m.scenarioOverlay(); scenarioOverlay != "" {
+		overlay = scenarioOverlay
 	}
 	if sourceOverlay := m.sourceImportOverlay(); sourceOverlay != "" {
 		overlay = sourceOverlay
