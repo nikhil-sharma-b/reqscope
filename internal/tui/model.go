@@ -176,6 +176,9 @@ func (m *Model) poll() tea.Cmd {
 func (m *Model) Init() tea.Cmd { return m.poll() }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case editorFinishedMsg:
+		m.finishExternalEditor(msg)
+		return m, nil
 	case exchangeMsg:
 		if m.requestCancel != nil {
 			m.requestCancel()

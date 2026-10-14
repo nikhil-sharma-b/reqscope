@@ -38,6 +38,7 @@ func defaults() []Binding {
 		{"request-compose", "Compose selected contract request", []string{"<leader> r c"}},
 		{"request-upload", "Select a local upload file reference", []string{"<leader> r f"}},
 		{"request-edit", "Edit current request draft", []string{"<leader> r e"}},
+		{"request-editor", "Edit request body in external editor", []string{"<leader> r o"}},
 		{"request-reset", "Clear current request draft", []string{"<leader> r x"}},
 		{"request-send", "Send current request", []string{"<leader> r s"}},
 		{"request-cancel", "Cancel running request", []string{"<leader> r k"}},
