@@ -49,6 +49,8 @@ type Model struct {
 	historyPage       project.HistoryPage
 	historyOffset     int
 	historyText       string
+	comparisonText    string
+	comparisonLines   []string
 	savedCases        []project.CaseResource
 	caseDraft         project.CaseResource
 	caseDelete        project.CaseResource
@@ -275,6 +277,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.scenarioKey(msg); handled {
 		return m, cmd
+	}
+	if m.comparisonKey(msg) {
+		return m, nil
 	}
 	if m.historyKey(msg) {
 		return m, nil
@@ -1005,6 +1010,13 @@ func (m *Model) View() tea.View {
 	}
 	base := fit(m.credentials.Sanitize(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches"), width, height)
 	overlay := m.environmentOverlay()
+	if m.overlay == "comparison-input" {
+		overlay = "Compare run IDs | Enter compare | Esc cancel\n" + m.comparisonText + "\n" + m.status
+	}
+	if m.overlay == "comparison-report" {
+		start := min(m.paletteIndex, max(0, len(m.comparisonLines)-1))
+		overlay = "Comparison | j/k scroll | Esc close\n" + strings.Join(m.comparisonLines[start:], "\n")
+	}
 	if m.overlay == "history-settings" {
 		overlay = "History retention JSON | Enter save | Esc cancel\n" + m.historyText + "\n" + m.status
 	}

@@ -14,10 +14,11 @@ import (
 
 // Case retains templates and credential references, never resolved request values.
 type Case struct {
-	ID         string         `json:"id" yaml:"id"`
-	Name       string         `json:"name" yaml:"name"`
-	Request    RequestDraft   `json:"request" yaml:"request"`
-	Validation map[string]any `json:"validation,omitempty" yaml:"validation,omitempty"`
+	ID               string         `json:"id" yaml:"id"`
+	Name             string         `json:"name" yaml:"name"`
+	Request          RequestDraft   `json:"request" yaml:"request"`
+	ComparisonIgnore IgnoreRules    `json:"comparisonIgnore,omitempty" yaml:"comparisonIgnore,omitempty"`
+	Validation       map[string]any `json:"validation,omitempty" yaml:"validation,omitempty"`
 }
 type CaseResource struct {
 	Case       `yaml:",inline"`
@@ -33,6 +34,9 @@ type CaseDeletion struct {
 func ValidateCase(c Case) error {
 	if !validID(c.ID) || strings.TrimSpace(c.Name) == "" {
 		return Fail("invalid_input", "case requires a UUID id and a nonempty name")
+	}
+	if err := c.ComparisonIgnore.Validate(); err != nil {
+		return err
 	}
 	d := c.Request
 	if d.EndpointID != "" && !validID(d.EndpointID) {

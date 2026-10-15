@@ -36,6 +36,15 @@ func (m *Model) historyLines() []string {
 	return lines
 }
 func (m *Model) historyAction(action string) bool {
+	if action == "compare" {
+		m.comparisonText = ""
+		if len(m.historyPage.Items) > 0 {
+			m.comparisonText = m.historyPage.Items[min(m.index, len(m.historyPage.Items)-1)].ID + " "
+		}
+		m.overlay = "comparison-input"
+		m.mode = "INSERT"
+		return true
+	}
 	if action == "history" {
 		m.historyOffset = 0
 		m.refreshHistory()

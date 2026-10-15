@@ -651,3 +651,48 @@ with Enter from `g h`. History pages contain 50 entries. Leader actions under
 `c` cleanup, `s` edit retention JSON and `a` associate with the current saved case.
 Request body evidence is capped at 1 MiB. Uploads and bodies that cannot be safely
 reopened retain metadata. Binary and incomplete unsafe bodies are withheld.
+
+### Compare retained responses
+
+Compare two retained run IDs belonging to the same saved case, including runs
+from different environments:
+
+```sh
+reqscope compare BEFORE_RUN_ID AFTER_RUN_ID --output json
+reqscope compare BEFORE_RUN_ID AFTER_RUN_ID --input ignores.json --output json
+```
+
+The result labels environment, input and contract digest changes and compares
+status, case-insensitive header names and JSON values. JSON changes use escaped
+JSON Pointer paths and `added`, `removed` or `changed` kinds. Objects ignore key
+order, arrays retain index order, and null differs from a missing field. Numeric
+values compare without losing integer precision. Text changes show removed and
+added lines with one-based line paths. The common prefix and suffix are omitted;
+the changed middle is shown as a replacement hunk.
+
+Save `comparisonIgnore` on a case through `case create`, revision-checked
+`case update`, or the TUI saved-case JSON editor:
+
+```json
+{"jsonPointers":["/updatedAt","/items/0/requestId"],"headers":["Date","X-Request-Id"]}
+```
+
+This object is also the optional `--input` document. Supplied rules replace saved
+rules for one comparison; `{}` disables all ignores for that invocation. JSON
+Pointers match exact paths, including an entire value's children when that value
+is selected. The empty pointer ignores the whole JSON body. Header ignores are
+case-insensitive. Rules never change stored evidence and do not affect execution
+or assertions. `input-schema get comparison.ignore` describes the input shape.
+
+In the TUI, `Space h d` opens comparison with the selected history ID prefilled.
+Enter two IDs separated by a space, use Ctrl+u to clear, then Enter to compare.
+The report scrolls with j/k and closes with Esc. Saved case rules apply.
+
+Comparisons expose up to 100 differences with 1024-byte value and path previews;
+output clipping is explicitly reported. JSON traversal stops at depth 64. At most
+100 ignore rules are accepted. Redacted or truncated evidence carries comparison
+limitations. Binary, withheld and unavailable bodies compare retained metadata
+only. These results cannot establish equality of original content. Missing or
+evicted runs return `not_found`, CLI exit 3; unrelated or ad hoc runs return
+`invalid_input`, exit 2. A successful comparison exits 0 even when differences
+exist.
