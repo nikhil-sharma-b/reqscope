@@ -63,6 +63,7 @@ func defaults() []Binding {
 		{"case-duplicate", "Duplicate selected case", []string{"<leader> c d"}},
 		{"case-delete", "Delete selected case", []string{"<leader> c x"}},
 		{"case-run", "Run selected case", []string{"<leader> c r"}},
+		{"compare", "Compare two retained run IDs", []string{"<leader> h d"}},
 		{"history-pin", "Pin selected run", []string{"<leader> h p"}},
 		{"history-unpin", "Unpin selected run", []string{"<leader> h u"}},
 		{"history-delete", "Delete selected unpinned run", []string{"<leader> h x"}},

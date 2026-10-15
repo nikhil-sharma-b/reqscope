@@ -21,13 +21,15 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
+var schemaNames = []string{"comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
 	props := map[string]any{"name": str}
 	required := []string{"name"}
 	switch name {
+	case "comparison.ignore":
+		return project.ComparisonIgnoreSchema(), nil
 	case "history.settings":
 		props = map[string]any{"perCase": map[string]any{"type": "integer", "minimum": 0}, "maxBytes": map[string]any{"type": "integer", "minimum": 0}}
 		required = []string{"perCase", "maxBytes"}
@@ -70,7 +72,7 @@ func schema(name string) (map[string]any, error) {
 		required = []string{}
 	case "case.create", "case.update":
 		draft, _ := schema("request.send")
-		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": project.ValidationInputSchema()}
+		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "request": draft, "validation": project.ValidationInputSchema(), "comparisonIgnore": project.ComparisonIgnoreSchema()}
 		required = []string{"id", "name", "request"}
 		if name == "case.update" {
 			props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
@@ -134,6 +136,12 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "comparison.ignore":
+		var v project.IgnoreRules
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, v.Validate()
 	case "history.settings":
 		var v project.HistoryLimits
 		if err := project.Decode(b, &v); err != nil {
