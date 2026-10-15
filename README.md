@@ -808,8 +808,8 @@ references to a deleted environment.
 Scenario execution records an aggregate `runId` plus individual records linked
 by `scenarioRunId` and `stepId`. Reports retain failures and skipped-step reasons.
 Pre-execution access/extraction denial returns exit 4 without starting a scenario
-history entry. A run that starts and then fails retains its report. `history get`
-returns at most 50 step summaries with `totalSteps` and `stepsTruncated`; inspect
+history entry. A run that starts and then fails retains its report. `scenario run`
+and `history get` return at most 50 step summaries with `totalSteps` and `stepsTruncated`; inspect
 individual step run IDs for bounded exchange previews. The TUI history pane
 reopens the full aggregate. Pin a report and any step baselines you need to keep:
 step records and aggregates have independent retention, so pinning a report does

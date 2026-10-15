@@ -370,6 +370,9 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 	if preview {
 		return nil
 	}
+	if err := revokeDeletedEnvironmentAccess(root, changes); err != nil {
+		return err
+	}
 	b, err := json.Marshal(transaction{1, changes})
 	if err != nil {
 		return err

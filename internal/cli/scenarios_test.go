@@ -3,6 +3,7 @@ package cli_test
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -128,5 +129,58 @@ func TestScenarioCLIRejectsUnknownFeaturesAndInvalidInputTypes(t *testing.T) {
 		if code != 2 {
 			t.Fatalf("%d %s input=%s", code, &out, body)
 		}
+	}
+}
+
+func TestScenarioCLIReportBoundsAndRetainsFullHistory(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	const body = "full retained scenario response"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, body) }))
+	defer server.Close()
+	root := t.TempDir()
+	s, err := project.Init(root, "Bounds", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _ := s.Resolve("staging")
+	env.BaseURLs["api"] = server.URL
+	if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
+		t.Fatal(err)
+	}
+	review, _ := project.ReviewAccess(root, env.ID)
+	if err := project.ApproveAccess(root, review); err != nil {
+		t.Fatal(err)
+	}
+	c, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Body", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/"}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var steps []project.ScenarioStep
+	for i := 0; i < 51; i++ {
+		steps = append(steps, project.ScenarioStep{ID: fmt.Sprintf("step-%d", i), CaseID: c.ID})
+	}
+	scenario, err := project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Large report", Steps: steps}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var out, diag bytes.Buffer
+	code := cli.Run([]string{"scenario", "run", scenario.ID, "--env", env.ID, "--project", root, "--output", "json"}, strings.NewReader(""), &out, &diag)
+	var envelope struct {
+		Data project.ScenarioReport `json:"data"`
+	}
+	if err := json.Unmarshal(out.Bytes(), &envelope); err != nil {
+		t.Fatal(err)
+	}
+	report := envelope.Data
+	if code != 0 || strings.Contains(out.String(), body) || len(report.Steps) != 50 || !report.StepsTruncated || report.TotalSteps != 51 {
+		t.Fatalf("unbounded CLI report: code=%d steps=%d truncated=%t total=%d", code, len(report.Steps), report.StepsTruncated, report.TotalSteps)
+	}
+	stored, err := project.GetRun(root, report.RunID)
+	if err != nil || stored.Scenario == nil || len(stored.Scenario.Steps) != 51 || stored.Scenario.Steps[0].Exchange.Body != body {
+		t.Fatal("full report not retained", err)
+	}
+	step, err := project.GetRun(root, report.Steps[0].Exchange.RunID)
+	if err != nil || step.Response.Body != body {
+		t.Fatal("step evidence unavailable", err)
 	}
 }

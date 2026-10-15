@@ -279,7 +279,8 @@ func PreviewRun(r Run, bodyBytes int) Run {
 				e.Message = clip(e.Message, 512)
 				step.Error = &e
 			}
-			step.Exchange = Exchange{RunID: step.Exchange.RunID}
+			step.Exchange.Headers = nil
+			step.Exchange = PreviewRun(Run{Response: step.Exchange}, 0).Response
 		}
 		r.Scenario = &report
 	}
@@ -307,6 +308,7 @@ func PreviewRun(r Run, bodyBytes int) Run {
 			headers[clip(k, 128)] = out
 		}
 		x.Headers = headers
+		x.Checks = append([]CheckResult(nil), x.Checks...)
 		if len(x.Checks) > 50 {
 			x.Checks = x.Checks[:50]
 		}

@@ -201,7 +201,7 @@ func TestEnvironmentDeletionRevokesAccessWithoutLoweringProtection(t *testing.T)
 	if _, err := project.CheckCLIAccess(root, env.ID, "api", ""); err != nil {
 		t.Fatal("preview revoked grant", err)
 	}
-	if _, err := project.DeleteEnvironment(root, env.ID, env.Revision, false); err != nil {
+	if err := project.Apply(root, []project.Change{{Path: filepath.Join("environments", env.ID+".yaml"), ExpectedRevision: env.Revision, Delete: true}}, false); err != nil {
 		t.Fatal(err)
 	}
 	original := env.Environment

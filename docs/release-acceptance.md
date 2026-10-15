@@ -107,6 +107,11 @@ coverage establishes local behavior; story 54 also needs native macOS evidence.
 | 53 | Retention/cleanup | `project/history_test.go`, `project/scenarios_test.go` |
 | 54 | Narrow/platform behavior | `tui/environment_test.go`, `tui/model_test.go`; macOS runtime gate outstanding |
 
+`TestScenarioCLIReportBoundsAndRetainsFullHistory` verifies that execution output
+returns at most 50 bounded step summaries while SQLite retains all steps and full
+sanitized bodies. `TestEnvironmentDeletionRevokesAccessWithoutLoweringProtection`
+also covers deletion through the shared batch writer.
+
 The registry covers delivered request, environment, credential, case, scenario,
 history, comparison, refresh and contract actions. Variable editing uses the
 ordinary environment JSON editor. Environment deletion uses `Space e x`.
