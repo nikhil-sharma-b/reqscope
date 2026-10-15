@@ -50,7 +50,9 @@ func schema(name string) (map[string]any, error) {
 	case "scenario.create", "scenario.update":
 		ordinary := map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}
 		binding := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"stepId", "extract"}, "properties": map[string]any{"stepId": str, "extract": str}}
-		step := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "caseId"}, "properties": map[string]any{"id": str, "caseId": map[string]any{"type": "string", "format": "uuid"}, "overrides": ordinary, "extracts": ordinary, "bindings": map[string]any{"type": "object", "additionalProperties": binding}}}
+		destination := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"kind", "module", "destination", "in", "field"}, "properties": map[string]any{"name": str, "kind": map[string]any{"type": "string", "enum": []string{"bearer", "api-key"}}, "module": str, "destination": str, "in": map[string]any{"type": "string", "enum": []string{"header", "query", "body"}}, "field": str}}
+		extraction := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"pointer", "destinations"}, "properties": map[string]any{"pointer": str, "destinations": map[string]any{"type": "array", "minItems": 1, "items": destination}}}
+		step := map[string]any{"type": "object", "additionalProperties": false, "required": []string{"id", "caseId"}, "properties": map[string]any{"id": str, "caseId": map[string]any{"type": "string", "format": "uuid"}, "overrides": ordinary, "extracts": ordinary, "secretExtracts": map[string]any{"type": "object", "additionalProperties": extraction}, "bindings": map[string]any{"type": "object", "additionalProperties": binding}}}
 		props = map[string]any{"id": map[string]any{"type": "string", "format": "uuid"}, "name": str, "continueOnFailure": map[string]any{"type": "boolean"}, "steps": map[string]any{"type": "array", "minItems": 1, "items": step}}
 		required = []string{"id", "name", "steps"}
 		if name == "scenario.update" {

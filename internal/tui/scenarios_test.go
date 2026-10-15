@@ -280,3 +280,72 @@ func TestScenarioTUIConfirmsProductionRedirectBeforeContact(t *testing.T) {
 		t.Fatalf("approved redirect failed %d %s", calls.Load(), m.View().Content)
 	}
 }
+
+func TestScenarioTUIApprovesProtectedLoginForCLI(t *testing.T) {
+	const token = "tui-approved-fresh-session"
+	var authenticated atomic.Bool
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path == "/me" {
+			authenticated.Store(r.Header.Get("Authorization") == "Bearer "+token)
+		}
+		io.WriteString(w, `{"custom":"`+token+`","echo":"`+token+`"}`)
+	}))
+	defer server.Close()
+	root, login, _ := scenarioTUIWorkspace(t, server.URL, "staging")
+	login.Request.URL = "/login"
+	var err error
+	login, err = project.SaveCase(root, login.Case, login.Revision, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	consumer, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Authenticated", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/me", Headers: []project.RequestField{{Name: "Authorization", Value: "{{auth}}"}}}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Login", Steps: []project.ScenarioStep{
+		{ID: "login", CaseID: login.ID, SecretExtracts: map[string]project.SecretExtraction{"session": {Pointer: "/custom", Destinations: []project.CredentialBinding{{Kind: "bearer", Module: "api", Destination: server.URL + "/me", In: "header", Field: "Authorization"}}}}},
+		{ID: "me", CaseID: consumer.ID, Bindings: map[string]project.ScenarioBinding{"auth": {StepID: "login", Extract: "session"}}},
+	}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	access, _ := project.ReviewAccess(root, "staging")
+	if err := project.ApproveAccess(root, access); err != nil {
+		t.Fatal(err)
+	}
+	runCLI := func(expected int) string {
+		t.Helper()
+		var out, diag bytes.Buffer
+		code := cli.Run([]string{"scenario", "run", s.ID, "--project", root, "--env", "staging", "--output", "json"}, strings.NewReader(""), &out, &diag)
+		if code != expected || strings.Contains(out.String()+diag.String(), token) {
+			t.Fatalf("code %d: %s %s", code, &out, &diag)
+		}
+		return out.String()
+	}
+	runCLI(4)
+	m, err := tui.New(root, tui.KeyConfig{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
+	scenarioKeys(m, "space", "s", "l", "space", "s", "a")
+	view := m.View().Content
+	for _, text := range []string{"Approve protected", "/custom", server.URL + "/me", "Authorization"} {
+		if !strings.Contains(view, text) {
+			t.Fatal("incomplete review", view)
+		}
+	}
+	key(m, "esc")
+	runCLI(4)
+	scenarioKeys(m, "space", "s", "a", "y")
+	runCLI(0)
+	if !authenticated.Load() {
+		t.Fatal("CLI token was not attached")
+	}
+	cmd := scenarioTUIStart(t, m)
+	m.Update(cmd())
+	if strings.Contains(m.View().Content, token) || !strings.Contains(m.View().Content, "Successful: true") {
+		t.Fatal(m.View().Content)
+	}
+}

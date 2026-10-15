@@ -54,6 +54,7 @@ func defaults() []Binding {
 		{"scenario-edit", "Edit selected scenario", []string{"<leader> s e"}},
 		{"scenario-delete", "Delete selected scenario", []string{"<leader> s x"}},
 		{"scenario-validate", "Validate selected scenario", []string{"<leader> s v"}},
+		{"scenario-approve-extractions", "Approve protected scenario extractions", []string{"<leader> s a"}},
 		{"scenario-run", "Run selected scenario", []string{"<leader> s r"}},
 		{"scenario-cancel", "Cancel running scenario", []string{"<leader> s k"}},
 		{"case-open", "Open selected case", []string{"<leader> c o"}},
