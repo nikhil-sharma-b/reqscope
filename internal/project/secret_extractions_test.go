@@ -190,3 +190,113 @@ func TestProtectedScenarioFailedExtractionSkipsDependentSends(t *testing.T) {
 		})
 	}
 }
+
+func TestProtectedPointersCannotBeReadBackAsNonStringValues(t *testing.T) {
+	for _, value := range []string{`null`, `123`, `""`, `{"nested":"private-value"}`, `["private-value"]`} {
+		t.Run(value, func(t *testing.T) {
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{"data":{"session":`+value+`}}`) }))
+			defer server.Close()
+			root := requestWorkspace(t, server.URL)
+			s := secureScenario(t, root, server.URL)
+			approveExtractions(t, root, s.ID)
+			ordinary := scenarioSave(t, root, []project.ScenarioStep{{ID: "copy", CaseID: s.Steps[0].CaseID, Extracts: map[string]string{"readback": "/data/session"}}}, false)
+			report, err := project.RunScenario(context.Background(), root, "staging", ordinary.ID, project.ScenarioOptions{})
+			if err == nil || report.Successful {
+				t.Fatal("protected non-string field readable", report)
+			}
+		})
+	}
+}
+
+func TestProtectedTokensRejectUnapprovedOriginsPlacementsAndRedirects(t *testing.T) {
+	for _, attack := range []string{"origin", "header", "query", "body", "redirect"} {
+		t.Run(attack, func(t *testing.T) {
+			var stolen atomic.Int32
+			evil := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { stolen.Add(1) }))
+			defer evil.Close()
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/steal" {
+					stolen.Add(1)
+				}
+				if attack == "redirect" && r.URL.Path == "/me" {
+					http.Redirect(w, r, "/steal", http.StatusTemporaryRedirect)
+					return
+				}
+				io.WriteString(w, `{"data":{"session":"protected-fresh-token"}}`)
+			}))
+			defer server.Close()
+			root := requestWorkspace(t, server.URL)
+			s := secureScenario(t, root, server.URL)
+			consumer, _ := project.GetCase(root, s.Steps[1].CaseID)
+			switch attack {
+			case "origin":
+				consumer.Request.URL = evil.URL + "/steal"
+			case "header":
+				consumer.Request.Headers = []project.RequestField{{Name: "X-Steal", Value: "{{auth}}"}}
+			case "query":
+				consumer.Request.Headers = nil
+				consumer.Request.Query = []project.RequestField{{Name: "stolen", Value: "{{auth}}"}}
+			case "body":
+				consumer.Request.Headers = nil
+				consumer.Request.Method = "POST"
+				consumer.Request.BodyType = "json"
+				consumer.Request.Body = `{"stolen":"{{auth}}"}`
+			}
+			if _, err := project.SaveCase(root, consumer.Case, consumer.Revision, false); err != nil {
+				t.Fatal(err)
+			}
+			approveExtractions(t, root, s.ID)
+			report, err := project.RunScenario(context.Background(), root, "staging", s.ID, project.ScenarioOptions{})
+			if err == nil || report.Successful || stolen.Load() != 0 {
+				t.Fatal("token reached unauthorized destination", report, err, stolen.Load())
+			}
+		})
+	}
+}
+
+func TestProtectedAPIKeysSupportPermittedQueryAndBody(t *testing.T) {
+	for _, placement := range []string{"query", "body"} {
+		t.Run(placement, func(t *testing.T) {
+			var authenticated atomic.Bool
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				if r.URL.Path == "/me" {
+					if placement == "query" {
+						authenticated.Store(r.URL.Query().Get("key") == "fresh-api-key")
+					} else {
+						b, _ := io.ReadAll(r.Body)
+						authenticated.Store(string(b) == `{"key":"fresh-api-key"}`)
+					}
+				}
+				io.WriteString(w, `{"data":{"session":"fresh-api-key"}}`)
+			}))
+			defer server.Close()
+			root := requestWorkspace(t, server.URL)
+			s := secureScenario(t, root, server.URL)
+			extract := s.Steps[0].SecretExtracts["session"]
+			extract.Destinations[0].Kind = "api-key"
+			extract.Destinations[0].In = placement
+			extract.Destinations[0].Field = ""
+			consumer, _ := project.GetCase(root, s.Steps[1].CaseID)
+			consumer.Request.Headers = nil
+			if placement == "query" {
+				extract.Destinations[0].Field = "key"
+				consumer.Request.Query = []project.RequestField{{Name: "key", Value: "{{auth}}"}}
+			} else {
+				consumer.Request.Method = "POST"
+				consumer.Request.BodyType = "json"
+				consumer.Request.Body = `{"key":"{{auth}}"}`
+			}
+			if _, err := project.SaveCase(root, consumer.Case, consumer.Revision, false); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := project.SaveScenario(root, s.Scenario, s.Revision, false); err != nil {
+				t.Fatal(err)
+			}
+			approveExtractions(t, root, s.ID)
+			report, err := project.RunScenario(context.Background(), root, "staging", s.ID, project.ScenarioOptions{})
+			if err != nil || !report.Successful || !authenticated.Load() {
+				t.Fatal("permitted token placement failed", report, err)
+			}
+		})
+	}
+}

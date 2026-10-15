@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -266,28 +267,28 @@ func (c *Credentials) captureSecrets(step ScenarioStep, ex *Exchange, values map
 // Approved pointers stay protected even in ordinary scenarios or direct sends.
 // Applying them across this environment prevents cloning a producer to read back
 // its token under another extraction name.
-func (c *Credentials) protectResponse(root, env string, ex *Exchange) error {
+func (c *Credentials) protectResponse(root, env string, ex *Exchange) (func(), error) {
 	s, err := Load(root)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	e, err := s.Resolve(env)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	a, _, err := readAccess(root, s)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if len(a.ProtectedPointers[e.ID]) == 0 {
-		return nil
+		return nil, nil
 	}
 	body, parseErr := jsonValue(ex.Body)
 	if parseErr != nil || ex.Truncated || ex.Binary {
 		ex.Body = ""
 		ex.Headers = http.Header{}
 		ex.BodyWithheld = true
-		return nil
+		return nil, nil
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -295,11 +296,56 @@ func (c *Credentials) protectResponse(root, env string, ex *Exchange) error {
 		for _, pointer := range pointers {
 			value, ok := pointerValue(body, pointer)
 			if ok {
-				if text, ok := value.(string); ok {
-					c.remember(text)
-				}
+				c.rememberProtectedValue(value)
 			}
 		}
 	}
-	return nil
+	return func() {
+		for _, pointers := range a.ProtectedPointers[e.ID] {
+			for _, pointer := range pointers {
+				if _, ok := pointerValue(body, pointer); ok {
+					body = redactPointer(body, pointer)
+				}
+			}
+		}
+		b, _ := json.Marshal(body)
+		ex.Body = string(b)
+	}, nil
+}
+
+func (c *Credentials) rememberProtectedValue(value any) {
+	switch x := value.(type) {
+	case string:
+		c.remember(x)
+	case map[string]any:
+		for _, v := range x {
+			c.rememberProtectedValue(v)
+		}
+	case []any:
+		for _, v := range x {
+			c.rememberProtectedValue(v)
+		}
+	}
+}
+
+func redactPointer(body any, pointer string) any {
+	if pointer == "" {
+		return "[REDACTED]"
+	}
+	end := strings.LastIndex(pointer, "/")
+	parent, ok := pointerValue(body, pointer[:end])
+	if !ok {
+		return body
+	}
+	token := strings.ReplaceAll(strings.ReplaceAll(pointer[end+1:], "~1", "/"), "~0", "~")
+	switch x := parent.(type) {
+	case map[string]any:
+		x[token] = "[REDACTED]"
+	case []any:
+		index, err := strconv.Atoi(token)
+		if err == nil && index >= 0 && index < len(x) && strconv.Itoa(index) == token {
+			x[index] = "[REDACTED]"
+		}
+	}
+	return body
 }

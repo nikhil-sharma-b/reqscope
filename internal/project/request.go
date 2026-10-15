@@ -556,16 +556,20 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		result.Body = string(b)
 	}
 	var captureErr error
-	if protectErr := c.protectResponse(root, env, &result); protectErr != nil {
+	if opts.captureResponse != nil {
+		captureErr = opts.captureResponse(&result)
+	}
+	redactProtected, protectErr := c.protectResponse(root, env, &result)
+	if protectErr != nil {
 		result.Body = ""
 		result.Headers = http.Header{}
 		result.BodyWithheld = true
 		return result, protectErr
 	}
-	if opts.captureResponse != nil {
-		captureErr = opts.captureResponse(&result)
-	}
 	result.Checks = responseChecks(result, v, endpoint)
+	if redactProtected != nil {
+		redactProtected()
+	}
 	c.sanitizeExchange(&result, used)
 	if captureErr != nil {
 		return result, captureErr
