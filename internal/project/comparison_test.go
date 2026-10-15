@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -217,5 +219,61 @@ func TestComparisonBoundsErrorsAndRuleValidation(t *testing.T) {
 	}
 	if _, e = project.CompareRuns(root, a, b, nil); e == nil {
 		t.Fatal("compared evicted evidence")
+	}
+}
+
+func TestComparisonLabelsContractChange(t *testing.T) {
+	root, c, a, _ := comparisonRuns(t, `{"ok":true}`, `{"ok":true}`, "application/json", 0)
+	old, e := project.GetRun(root, a)
+	if e != nil {
+		t.Fatal(e)
+	}
+	path := filepath.Join(t.TempDir(), "contract.json")
+	if e = os.WriteFile(path, []byte(`{"openapi":"3.0.3","info":{"title":"Comparison","version":"1"},"paths":{"/before":{"get":{"responses":{"200":{"description":"ok"}}}}}}`), 0600); e != nil {
+		t.Fatal(e)
+	}
+	spec, e := project.ImportSpecification(root, path, false)
+	if e != nil {
+		t.Fatal(e)
+	}
+	s, e := project.Load(root)
+	if e != nil {
+		t.Fatal(e)
+	}
+	env, e := s.Resolve("staging")
+	if e != nil {
+		t.Fatal(e)
+	}
+	env.BaseURLs[spec.ModuleID] = strings.TrimSuffix(old.Request.Destination, "/before")
+	if e = project.SaveEnvironment(root, env.Environment, env.Revision, false, false); e != nil {
+		t.Fatal(e)
+	}
+	review, e := project.ReviewAccess(root, "staging")
+	if e != nil {
+		t.Fatal(e)
+	}
+	if e = project.ApproveAccess(root, review); e != nil {
+		t.Fatal(e)
+	}
+	c.Request = project.RequestDraft{EndpointID: spec.Endpoints[0].ID}
+	if _, e = project.SaveCase(root, c.Case, c.Revision, false); e != nil {
+		t.Fatal(e)
+	}
+	b, e := project.SendCase(context.Background(), root, "staging", c.ID, nil, project.SendOptions{})
+	if e != nil {
+		t.Fatal(e)
+	}
+	result, e := project.CompareRuns(root, a, b.RunID, nil)
+	if e != nil {
+		t.Fatal(e)
+	}
+	found := false
+	for _, d := range result.Differences {
+		if d.Area == "context" && d.Path == "contractDigest" && d.Kind == "changed" {
+			found = true
+		}
+	}
+	if !found {
+		t.Fatalf("contract change unlabelled: %+v", result)
 	}
 }
