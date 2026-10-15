@@ -21,13 +21,20 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete", "comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
+type RefreshApplyInput struct {
+	Token string `json:"token" yaml:"token"`
+}
+
+var schemaNames = []string{"spec.refresh-apply", "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete", "comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
 	props := map[string]any{"name": str}
 	required := []string{"name"}
 	switch name {
+	case "spec.refresh-apply":
+		props = map[string]any{"token": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+		required = []string{"token"}
 	case "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete":
 		props = map[string]any{"sourceId": map[string]any{"type": "string", "format": "uuid"}, "revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "importedEdit": map[string]any{"type": "boolean"}, "document": str, "value": map[string]any{}, "reassignTo": map[string]any{"type": "string", "format": "uuid"}}
 		required = []string{"sourceId", "revision", "importedEdit"}
@@ -49,7 +56,7 @@ func schema(name string) (map[string]any, error) {
 		props = map[string]any{"perCase": map[string]any{"type": "integer", "minimum": 0}, "maxBytes": map[string]any{"type": "integer", "minimum": 0}}
 		required = []string{"perCase", "maxBytes"}
 	case "request.send":
-		props = map[string]any{}
+		props = map[string]any{"disconnected": map[string]any{"type": "boolean"}}
 		for _, name := range []string{"endpointId", "module", "method", "url", "body", "bodyType", "contentType", "bodyFile"} {
 			props[name] = map[string]any{"type": "string"}
 		}
@@ -151,6 +158,12 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "spec.refresh-apply":
+		var v RefreshApplyInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete":
 		var v project.ContractEdit
 		if err := project.Decode(b, &v); err != nil {

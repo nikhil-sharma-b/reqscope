@@ -76,6 +76,8 @@ type Model struct {
 	importPreview     project.Specification
 	contractText      string
 	contractPreview   project.ContractImpact
+	refreshPreview    project.RefreshPreview
+	externalCase      project.CaseResource
 	sourceCandidate   project.SourceCandidate
 	sourceDiscovery   project.SourceDiscovery
 	detail            string
@@ -238,24 +240,40 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case refreshMsg:
 		if msg.err != nil {
 			m.status = msg.err.Error()
-		} else if m.dirty && msg.snapshot.Revision != m.snapshot.Revision {
-			m.status = "Project changed externally. Draft retained; discard/reload or reconcile before saving."
-			m.snapshot.Environments = msg.snapshot.Environments
-		} else if !m.dirty {
-			m.snapshot = msg.snapshot
-			m.savedScenarios, _ = project.Scenarios(m.root)
+		} else {
+			if m.dirty {
+				if msg.snapshot.Revision != m.snapshot.Revision {
+					m.status = "Project changed externally. Draft retained; discard/reload or reconcile before saving."
+				}
+				m.snapshot.Environments = msg.snapshot.Environments
+			} else {
+				m.snapshot = msg.snapshot
+				m.draft = msg.snapshot.Manifest.Name
+			}
+			if flows, err := project.Scenarios(m.root); err == nil {
+				m.savedScenarios = flows
+			} else {
+				m.status = err.Error()
+			}
 			if cases, err := project.Cases(m.root); err == nil {
 				m.savedCases = cases
-				if m.caseDraft.ID != "" {
-					for _, current := range cases {
-						if current.ID == m.caseDraft.ID && current.Revision != m.caseDraft.Revision {
-							if m.requestDirty() {
-								m.status = "Case changed externally. Draft retained; reconcile or discard before saving."
-							} else {
-								m.loadCaseDraft(current)
-							}
-						}
+				found := m.caseDraft.ID == ""
+				for _, current := range cases {
+					if current.ID != m.caseDraft.ID {
+						continue
 					}
+					found = true
+					if current.Revision == m.caseDraft.Revision {
+						continue
+					}
+					if m.requestDirty() {
+						m.status = "Case changed externally. Draft retained; use case-reload to discard or case-reconcile to review external changes."
+					} else {
+						m.loadCaseDraft(current)
+					}
+				}
+				if !found {
+					m.status = "Case deleted externally. Draft retained; duplicate it with a new ID or discard it."
 				}
 			} else {
 				m.status = err.Error()
@@ -265,7 +283,6 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			} else {
 				m.status = err.Error()
 			}
-			m.draft = msg.snapshot.Manifest.Name
 		}
 		return m, m.poll()
 	case tea.WindowSizeMsg:
@@ -329,6 +346,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 		return m, nil
 	}
 	if m.environmentUpdate(msg) {
+		return m, nil
+	}
+	if m.refreshKey(msg) {
 		return m, nil
 	}
 	if m.contractKey(msg) {
@@ -576,6 +596,9 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 			m.nextCount = n
 			return m, nil
 		}
+	}
+	if m.refreshAction(action) {
+		return m, nil
 	}
 	if m.contractAction(action) {
 		if action == "contract-export" && m.overlay == "detail" {
@@ -1043,6 +1066,9 @@ func (m *Model) View() tea.View {
 	if scenarioOverlay := m.scenarioOverlay(); scenarioOverlay != "" {
 		overlay = scenarioOverlay
 	}
+	if refreshOverlay := m.refreshOverlay(); refreshOverlay != "" {
+		overlay = refreshOverlay
+	}
 	if contractOverlay := m.contractOverlay(); contractOverlay != "" {
 		overlay = contractOverlay
 	}
@@ -1094,7 +1120,7 @@ func (m *Model) View() tea.View {
 	if overlay != "" {
 		overlay = m.credentials.Sanitize(overlay)
 		ow := max(1, min(width, 64))
-		if strings.HasPrefix(m.overlay, "environment-") || strings.HasPrefix(m.overlay, "credential-") || strings.HasPrefix(m.overlay, "source-") || strings.HasPrefix(m.overlay, "import") {
+		if strings.HasPrefix(m.overlay, "environment-") || strings.HasPrefix(m.overlay, "credential-") || strings.HasPrefix(m.overlay, "source-") || strings.HasPrefix(m.overlay, "import") || m.overlay == "refresh-confirm" || m.overlay == "case-reconcile" {
 			ow = width
 			overlay = ansi.Wrap(overlay, max(1, ow-4), "")
 		}

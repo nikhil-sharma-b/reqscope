@@ -20,6 +20,8 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   project init [NAME] [--input FILE|-] [--preview]
   project inspect|validate
   project update --input FILE|- [--preview]
+  spec refresh-preview SOURCE_ID [--env ENV --module MODULE]
+  spec refresh-apply SOURCE_ID --input FILE|- [--env ENV --module MODULE]
   spec import (--input FILE | --url URL) [--select NAME_OR_URL] [--env ENV --module MODULE --input AUTH_FILE] [--preview]
   spec inspect [SOURCE_ID]
   endpoint list [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag]

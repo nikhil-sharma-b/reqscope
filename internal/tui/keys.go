@@ -73,6 +73,8 @@ func defaults() []Binding {
 		{"history-previous", "Previous history page", []string{"<leader> h b"}},
 		{"history-settings", "Edit history retention JSON", []string{"<leader> h s"}},
 		{"history-associate", "Associate run with current saved case", []string{"<leader> h a"}},
+		{"contract-refresh", "Preview contract refresh", []string{"<leader> d r"}},
+		{"case-reconcile", "Manually reconcile external case edits", []string{"<leader> c m"}}, {"case-reload", "Discard draft and reload case", []string{"<leader> c z"}},
 	}
 }
 func Bindings(c KeyConfig) ([]Binding, error) {

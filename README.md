@@ -47,7 +47,7 @@ bin/reqscope schema get SCHEMA_UUID --project ./my-api --output json
 
 Imports accept Swagger 2.0 and OpenAPI 3.0/3.1 in JSON or YAML. Select a file with `--input`; stdin imports are unavailable because local references need a directory root. References stay within the selected file's directory, reject symlinks, and never fetch remote URLs. Traversal is capped at 64 files, 64 levels, 100,000 visited values and 10 MiB total input. Missing references and cycles reject the import. Recursive schema contracts therefore require simplification before import.
 
-Preview resolves references and checks the supported structure without persisting resources. Applying an import atomically records source/module UUIDs in the manifest and stores the original document bytes, resolved import base, digest, operations and schemas in `specs/SOURCE_UUID.yaml`. Unknown extensions remain intact. Endpoint IDs derive from source UUID, method and path, independently of operationId. Each import creates a new source; refresh is a later ticket.
+Preview resolves references and checks the supported structure without persisting resources. Applying an import atomically records source/module UUIDs in the manifest and stores the original document bytes, resolved import base, digest, operations and schemas in `specs/SOURCE_UUID.yaml`. Unknown extensions remain intact. Endpoint IDs derive from source UUID, method and path, independently of operationId. Each import creates a new source. Use refresh to update an existing source while retaining its IDs and saved inputs.
 
 Inspection includes inherited path parameters, operation inputs/responses, descriptions, tags and server/security context. `diagnostics` reports unsupported constructs; `complete` remains false because response schema validation is not implemented. A successful import means the contract can be inspected, not that its response constraints were fully validated.
 
@@ -732,3 +732,38 @@ and scenarios. Enter applies; Esc returns to editing. The selected endpoint or
 schema chooses the source, or the first source is used from other panes.
 `Space d o` copies the contract document bundle to the terminal clipboard and
 opens an inspection view.
+
+### Refresh and concurrent edits
+
+Refresh an existing source explicitly. Preview re-reads its original local file
+or approved remote URL and compares the imported base, local contract edits and
+incoming documents.
+
+```sh
+bin/reqscope spec refresh-preview SOURCE_ID --project ./my-api --output json
+bin/reqscope input-schema get spec.refresh-apply --output json
+# Save the returned token as {"token":"..."} in refresh.json.
+bin/reqscope spec refresh-apply SOURCE_ID --input refresh.json --project ./my-api --output json
+```
+
+Preview lists added, changed and removed endpoints, affected cases, conflicting
+document paths and input diagnostics. Apply fetches again and rejects a missing
+or stale token. Local contract conflicts must be reconciled before a new preview.
+Network refresh uses the import origin approvals and optional `--env` and
+`--module` credential context. Refresh never changes environment destinations or
+credential bindings. Contract destination or security changes revoke affected
+CLI approvals before the transaction is applied.
+
+Removed operations retain endpoint tombstones. Their cases keep saved inputs and
+receive `request.disconnected: true`. To repair a case, explicitly update its
+`endpointId` and clear `disconnected`, or clear `endpointId`, supply the independent
+request's module, method and URL, and clear `disconnected`. A returning backend
+operation does not reconnect a case automatically. Case updates require the
+current revision as usual. Contract and case changes share a recoverable transaction.
+
+In the TUI, `Space d r` previews the selected source, Enter applies and Esc cancels.
+Clean external case changes reload during polling. Dirty buffers remain available;
+`Space c z` discards the case draft and reloads, while `Space c m` displays the
+external case for manual comparison. Enter accepts that revision while retaining
+local inputs for further editing and saving. Invalid external files show errors
+and retain the last valid view. Unsaved project-name edits survive contract refresh.

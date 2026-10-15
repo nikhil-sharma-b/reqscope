@@ -312,6 +312,7 @@ func ImportSource(root string, candidate SourceCandidate, preview bool, expected
 	var v any
 	var err error
 	if candidate.Spec != nil {
+		r.embeddedName = candidate.Name
 		// Re-read the containing resource so a changed embedded declaration cannot apply a stale preview.
 		discovery, err := DiscoverSource(root, candidate.Location, opts)
 		if err != nil {

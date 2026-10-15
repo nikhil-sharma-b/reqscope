@@ -14,6 +14,24 @@ func specificationCommand(o options, in io.Reader) (any, error) {
 		return nil, err
 	}
 	group, action := o.args[0], o.args[1]
+	if group == "spec" && (action == "refresh-preview" || action == "refresh-apply") {
+		if len(o.args) != 3 {
+			return nil, project.Fail("invalid_input", "spec refresh requires a source ID")
+		}
+		token := ""
+		if action == "refresh-apply" {
+			b, err := input(o, in)
+			if err != nil {
+				return nil, err
+			}
+			value, err := validateInput("spec.refresh-apply", b)
+			if err != nil {
+				return nil, err
+			}
+			token = value.(RefreshApplyInput).Token
+		}
+		return project.RefreshSpecification(root, o.args[2], token, action == "refresh-preview" || o.preview, project.SourceImportOptions{Environment: o.env, Module: o.module, Credentials: o.credentials})
+	}
 	if (group == "endpoint" || group == "schema") && (action == "create" || action == "update" || action == "delete") {
 		if len(o.args) != 2 {
 			return nil, project.Fail("invalid_input", "contract edits require --input and no positional arguments")
