@@ -84,3 +84,34 @@ func TestActiveDestinationWrapsAtNarrowWidths(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvironmentDeletionUsesRegistryConfirmationAndRevision(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	if _, err := project.Init(root, "Delete", false); err != nil {
+		t.Fatal(err)
+	}
+	m, err := tui.New(root, tui.KeyConfig{Leader: ","})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m.Update(tea.WindowSizeMsg{Width: 40, Height: 16})
+	for _, k := range []string{",", "e", "l", "G", ",", "e", "x"} {
+		key(m, k)
+	}
+	if !strings.Contains(m.View().Content, "Delete environment staging") {
+		t.Fatal(m.View().Content)
+	}
+	key(m, "esc")
+	snapshot, _ := project.Load(root)
+	if _, err := snapshot.Resolve("staging"); err != nil {
+		t.Fatal("cancel deleted environment", err)
+	}
+	for _, k := range []string{",", "e", "x", "y"} {
+		key(m, k)
+	}
+	snapshot, _ = project.Load(root)
+	if _, err := snapshot.Resolve("staging"); err == nil {
+		t.Fatal("environment not deleted")
+	}
+}

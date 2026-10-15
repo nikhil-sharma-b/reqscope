@@ -18,6 +18,10 @@ import (
 
 const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   project init [NAME] [--input FILE|-] [--preview]
+  environment delete ID_OR_NAME --input FILE|- [--preview]
+  variables list|get NAME --env ID_OR_NAME
+  variables create|update --env ID_OR_NAME --input FILE|- [--preview]
+  variables delete NAME --env ID_OR_NAME --input FILE|- [--preview]
   project inspect|validate
   project update --input FILE|- [--preview]
   spec refresh-preview SOURCE_ID [--env ENV --module MODULE]
@@ -307,6 +311,9 @@ func execute(o options, in io.Reader) (any, error) {
 	if group == "secret" || group == "access" {
 		return credentialCommand(o)
 	}
+	if group == "variables" {
+		return variablesCommand(o, in)
+	}
 	if group == "scenario" {
 		return scenarioCommand(o, in)
 	}
@@ -384,11 +391,11 @@ func execute(o options, in io.Reader) (any, error) {
 	if group == "project" && action != "inspect" && action != "validate" && action != "update" {
 		return nil, project.Fail("invalid_input", "unknown project operation %q", action)
 	}
-	if group == "environment" && action != "list" && action != "get" && action != "create" && action != "update" && action != "check-access" {
+	if group == "environment" && action != "list" && action != "get" && action != "create" && action != "update" && action != "check-access" && action != "delete" {
 		return nil, project.Fail("invalid_input", "unknown environment operation %q", action)
 	}
 	expectedArgs := 2
-	if group == "environment" && action == "get" {
+	if group == "environment" && (action == "get" || action == "delete") {
 		expectedArgs = 3
 	}
 	if len(o.args) != expectedArgs {
@@ -432,6 +439,16 @@ func execute(o options, in io.Reader) (any, error) {
 		}
 	}
 	switch action {
+	case "delete":
+		b, err := input(o, in)
+		if err != nil {
+			return nil, err
+		}
+		v, err := validateInput("environment.delete", b)
+		if err != nil {
+			return nil, err
+		}
+		return project.DeleteEnvironment(root, o.args[2], v.(CaseDeleteInput).Revision, o.preview)
 	case "check-access":
 		return project.CheckCLIAccess(root, o.env, o.module, o.url)
 	case "list":

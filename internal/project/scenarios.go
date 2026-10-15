@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"time"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -282,10 +283,13 @@ type ScenarioStepReport struct {
 	Exchange       Exchange `json:"exchange"`
 }
 type ScenarioReport struct {
-	ScenarioID string               `json:"scenarioId"`
-	Revision   string               `json:"revision"`
-	Successful bool                 `json:"successful"`
-	Steps      []ScenarioStepReport `json:"steps"`
+	TotalSteps     int                  `json:"totalSteps"`
+	StepsTruncated bool                 `json:"stepsTruncated"`
+	RunID          string               `json:"runId,omitempty"`
+	ScenarioID     string               `json:"scenarioId"`
+	Revision       string               `json:"revision"`
+	Successful     bool                 `json:"successful"`
+	Steps          []ScenarioStepReport `json:"steps"`
 }
 
 // Confirm is called before each actual production send. Returning an error ends the run.
@@ -302,7 +306,8 @@ func RunScenario(ctx context.Context, root, env, selector string, opts ScenarioO
 	return run.Run(ctx, root, env, opts)
 }
 func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts ScenarioOptions) (report ScenarioReport, err error) {
-	report = ScenarioReport{ScenarioID: run.resource.ID, Revision: run.resource.Revision, Successful: true, Steps: []ScenarioStepReport{}}
+	started := time.Now().UTC()
+	report = ScenarioReport{TotalSteps: len(run.inputs), ScenarioID: run.resource.ID, Revision: run.resource.Revision, Successful: true, Steps: []ScenarioStepReport{}}
 	c := opts.Credentials
 	if c == nil {
 		c = DefaultCredentials
@@ -314,11 +319,57 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 		if err != nil {
 			report.Successful = false
 		}
+		unrecorded := map[string]bool{}
+		// Steps rejected before send, including dependency skips, need evidence too.
+		// Transport attempts already recorded their exchange in send.
+		if report.RunID != "" {
+			for i := range report.Steps {
+				step := &report.Steps[i]
+				if step.Exchange.RunID != "" {
+					continue
+				}
+				step.Exchange.RunID = newRunID()
+				unrecorded[step.Exchange.RunID] = true
+				step.Exchange.CaseID = step.CaseID
+				step.Exchange.Transport = "not-started"
+			}
+		}
 		b, e := json.Marshal(report)
 		if e == nil {
 			_ = json.Unmarshal(c.SanitizeJSON(b), &report)
 		}
 		err = c.SanitizeError(err)
+		if report.RunID != "" {
+			for _, step := range report.Steps {
+				if !unrecorded[step.Exchange.RunID] {
+					continue
+				}
+				message := step.Reason
+				if step.Error != nil {
+					message = step.Error.Message
+				}
+				evidence := Run{ID: step.Exchange.RunID, CaseID: step.CaseID,
+					ScenarioRunID: report.RunID, StepID: step.ID, Environment: c.Sanitize(env),
+					StartedAt: started, InputDigest: step.CaseRevision, ContractDigest: step.ContractDigest,
+					Outcome: step.Outcome, Error: message, Response: step.Exchange}
+				if e := c.recordRun(root, evidence); e != nil {
+					report.Successful = false
+					err = errors.Join(err, Fail("storage_error", "could not record scenario step history"))
+				}
+			}
+			outcome := "completed"
+			message := ""
+			if err != nil {
+				outcome = "failed"
+				message = err.Error()
+			}
+			record := Run{ScenarioID: report.ScenarioID, ID: report.RunID, Environment: c.Sanitize(env), StartedAt: started,
+				InputDigest: run.resource.Revision, Outcome: outcome, Error: message, Scenario: &report}
+			if e := c.recordRun(root, record); e != nil {
+				report.Successful = false
+				err = errors.Join(err, Fail("storage_error", "could not record scenario history"))
+			}
+		}
 	}()
 	if err := c.Refresh(root); err != nil {
 		return report, err
@@ -341,6 +392,7 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 	if err := run.checkExtractionApproval(root, env); err != nil {
 		return report, err
 	}
+	report.RunID = newRunID()
 	values := map[string]map[string]string{}
 	outcomes := map[string]string{}
 	stopped := false
@@ -388,6 +440,8 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 			variables[k] = values[b.StepID][b.Extract]
 		}
 		sendOpts := opts.SendOptions
+		sendOpts.scenarioRunID = report.RunID
+		sendOpts.stepID = step.ID
 		sendOpts.Variables = variables
 		sendOpts.Validation = input.source.Validation
 		sendOpts.Credentials = c

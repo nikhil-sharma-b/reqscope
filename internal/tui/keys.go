@@ -44,6 +44,7 @@ func defaults() []Binding {
 		{"request-send", "Send current request", []string{"<leader> r s"}},
 		{"request-cancel", "Cancel running request", []string{"<leader> r k"}},
 		{"response-copy", "Copy retained response body", []string{"<leader> r y"}},
+		{"environment-delete", "Delete selected environment", []string{"<leader> e x"}},
 		{"environment-create", "Create environment", []string{"<leader> e c"}},
 		{"environment-edit", "Edit environment and variables", []string{"<leader> e e"}},
 		{"environment-select", "Select active environment", []string{"<leader> e s"}},

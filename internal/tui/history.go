@@ -24,6 +24,9 @@ func (m *Model) historyLines() []string {
 	lines := []string{}
 	for i, r := range m.historyPage.Items {
 		line := fmt.Sprintf("%s | %s | %s %s | %s | pinned=%t", r.ID, r.StartedAt.Local().Format("2006-01-02 15:04:05"), r.Response.Method, r.Response.Destination, r.Outcome, r.Pinned)
+		if r.ScenarioID != "" {
+			line = fmt.Sprintf("%s | %s | scenario | %s | pinned=%t", r.ID, r.StartedAt.Local().Format("2006-01-02 15:04:05"), r.Outcome, r.Pinned)
+		}
 		mark := "  "
 		if i == m.index {
 			mark = "> "
@@ -85,6 +88,12 @@ func (m *Model) historyAction(action string) bool {
 			full, err := project.GetRun(m.root, r.ID)
 			if err != nil {
 				m.status = err.Error()
+				return true
+			}
+			if full.Scenario != nil {
+				m.scenarioReport = *full.Scenario
+				m.overlay = "scenario-report"
+				m.status = full.Outcome + " " + full.Error
 				return true
 			}
 			m.exchange = full.Response

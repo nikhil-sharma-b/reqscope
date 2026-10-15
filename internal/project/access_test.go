@@ -176,3 +176,43 @@ func TestPromotionProtectsAgainstImmediateExternalDowngrade(t *testing.T) {
 		t.Fatalf("lost protection %v %v", e, err)
 	}
 }
+
+func TestEnvironmentDeletionRevokesAccessWithoutLoweringProtection(t *testing.T) {
+	t.Setenv("XDG_DATA_HOME", t.TempDir())
+	root := t.TempDir()
+	s, err := project.Init(root, "Delete", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	env, _ := s.Resolve("production")
+	env.BaseURLs["api"] = "https://production.example.com"
+	if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
+		t.Fatal(err)
+	}
+	s, _ = project.Load(root)
+	env, _ = s.Resolve(env.ID)
+	review, _ := project.ReviewAccess(root, env.ID)
+	if err := project.ApproveAccess(root, review); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := project.DeleteEnvironment(root, env.ID, env.Revision, true); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := project.CheckCLIAccess(root, env.ID, "api", ""); err != nil {
+		t.Fatal("preview revoked grant", err)
+	}
+	if _, err := project.DeleteEnvironment(root, env.ID, env.Revision, false); err != nil {
+		t.Fatal(err)
+	}
+	original := env.Environment
+	env.Classification = "nonproduction"
+	if err := project.SaveEnvironment(root, env.Environment, "", false, false); err == nil {
+		t.Fatal("deletion lowered production protection")
+	}
+	if err := project.SaveEnvironment(root, original, "", false, false); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := project.CheckCLIAccess(root, env.ID, "api", ""); err == nil {
+		t.Fatal("recreated environment recovered grant")
+	}
+}

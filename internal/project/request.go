@@ -45,6 +45,8 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
+	scenarioRunID   string
+	stepID          string
 	CaseID          string
 	Draft           bool
 	confirmRedirect func(context.Context, PreparedRequest) (string, error)
@@ -441,7 +443,7 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 			inputDigest = Digest([]byte(p.Fingerprint + inputDigest))
 		}
 		contract, _ := json.Marshal(endpoint)
-		r := Run{ID: id, CaseID: opts.CaseID, Environment: c.Sanitize(env), StartedAt: started.UTC(), InputDigest: inputDigest, ContractDigest: Digest(contract), Request: request, Response: result, Outcome: "completed"}
+		r := Run{ScenarioRunID: opts.scenarioRunID, StepID: opts.stepID, ID: id, CaseID: opts.CaseID, Environment: c.Sanitize(env), StartedAt: started.UTC(), InputDigest: inputDigest, ContractDigest: Digest(contract), Request: request, Response: result, Outcome: "completed"}
 		if err != nil {
 			r.Outcome = "failed"
 			r.Error = err.Error()

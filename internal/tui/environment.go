@@ -18,6 +18,15 @@ func (m *Model) selectedEnvironment() (project.Resource, bool) {
 }
 func (m *Model) environmentAction(action string) bool {
 	switch action {
+	case "environment-delete":
+		e, ok := m.selectedEnvironment()
+		if !ok {
+			return true
+		}
+		m.environmentDraft = e
+		m.overlay = "environment-delete"
+		m.mode = "NORMAL"
+
 	case "environment-create", "environment-edit":
 		var e project.Resource
 		if action == "environment-edit" {
@@ -65,6 +74,25 @@ func (m *Model) environmentAction(action string) bool {
 }
 func (m *Model) environmentUpdate(msg tea.KeyPressMsg) bool {
 	switch m.overlay {
+	case "environment-delete":
+		if msg.String() == "esc" {
+			m.overlay = ""
+		}
+		if msg.String() == "y" {
+			_, err := project.DeleteEnvironment(m.root, m.environmentDraft.ID, m.environmentDraft.Revision, false)
+			if err != nil {
+				m.status = err.Error()
+			} else {
+				if m.activeEnvironment == m.environmentDraft.ID {
+					m.activeEnvironment = ""
+				}
+				m.reload()
+				m.overlay = ""
+				m.status = "Environment deleted; local credentials retained"
+			}
+		}
+		return true
+
 	case "environment-edit":
 		switch msg.String() {
 		case "ctrl+u":
@@ -155,6 +183,9 @@ func (m *Model) activeDestination() string {
 }
 func (m *Model) environmentOverlay() string {
 	switch m.overlay {
+	case "environment-delete":
+		return "Delete environment " + m.environmentDraft.Name + "?\ny delete | Esc cancel\nLocal credentials remain; CLI approval is revoked.\n" + m.status
+
 	case "environment-edit":
 		return "Edit environment JSON | ID is fixed\n" + m.environmentText + "\nCtrl+u clear | Enter save | Esc cancel\n" + m.status
 	case "environment-lower":

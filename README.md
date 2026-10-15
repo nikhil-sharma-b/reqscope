@@ -1,6 +1,6 @@
 # Reqscope
 
-Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. It initializes and reopens projects, imports local and remote Swagger/OpenAPI specifications, discovers Swagger UI sources, inspects endpoints and schemas, and sends HTTP requests with protected credentials. History is covered by a later ticket.
+Reqscope is a local API workspace with a keyboard-driven TUI and a noninteractive CLI. It initializes and reopens projects, imports local and remote Swagger/OpenAPI specifications, discovers Swagger UI sources, inspects endpoints and schemas, and sends HTTP requests with protected credentials. It records sanitized runs, executes secure scenarios, compares responses and refreshes imported contracts.
 
 Requires Go 1.26 or newer. Linux and macOS are the supported targets.
 
@@ -31,7 +31,7 @@ Add these patterns to a project's `.gitignore`:
 
 All application readers and writers take the same OS project lock. Writes validate the complete batch and check expected revisions before publishing a durable journal. Each resource is written through a synced temporary file and atomic rename. A reader first replays an interrupted journal under the lock, then loads the project. External edits conflicting with recovery block reopening and report the file to reconcile. External tools reading files directly do not participate in the application lock.
 
-The project files contain no credentials, grants or responses. Their local storage arrives in later tickets; this implementation does not create those stores.
+Project exports contain no credentials, grants or responses. OS credential storage holds persistent secret values; the OS user data directory holds local access metadata and SQLite history, scoped to project ID and canonical path. Session-only credentials remain in memory.
 
 ## Local specification imports
 
@@ -49,7 +49,7 @@ Imports accept Swagger 2.0 and OpenAPI 3.0/3.1 in JSON or YAML. Select a file wi
 
 Preview resolves references and checks the supported structure without persisting resources. Applying an import atomically records source/module UUIDs in the manifest and stores the original document bytes, resolved import base, digest, operations and schemas in `specs/SOURCE_UUID.yaml`. Unknown extensions remain intact. Endpoint IDs derive from source UUID, method and path, independently of operationId. Each import creates a new source. Use refresh to update an existing source while retaining its IDs and saved inputs.
 
-Inspection includes inherited path parameters, operation inputs/responses, descriptions, tags and server/security context. `diagnostics` reports unsupported constructs; `complete` remains false because response schema validation is not implemented. A successful import means the contract can be inspected, not that its response constraints were fully validated.
+Inspection includes inherited path parameters, operation inputs/responses, descriptions, tags and server/security context. `diagnostics` reports unsupported constructs; `complete` remains false because contract support is deliberately partial. Response validation supports the documented subset and marks unsupported checks incomplete. A successful import means the contract can be inspected, not that its response constraints were fully validated.
 
 ## Swagger UI and raw URL imports
 
@@ -141,7 +141,7 @@ Execution precedence follows the specification: unsuccessful scenarios use 6 wit
 
 ## TUI keys
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case and scenario panes support saved workflows. The history pane shows an empty state until history storage arrives.
+The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case and scenario panes support saved workflows. The history pane lists retained runs and scenario reports. Enter reopens the selected evidence.
 
 - `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
 - `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
@@ -767,3 +767,56 @@ Clean external case changes reload during polling. Dirty buffers remain availabl
 external case for manual comparison. Enter accepts that revision while retaining
 local inputs for further editing and saving. Invalid external files show errors
 and retain the last valid view. Unsaved project-name edits survive contract refresh.
+
+## Installation and release acceptance
+
+Build from a checkout with Go 1.26 or newer and a C toolchain for race-enabled
+tests. Run `make build`, then install the native binary into a directory on PATH:
+
+```sh
+install -m 755 bin/reqscope "$HOME/.local/bin/reqscope"
+```
+
+Create that directory first if needed. Build on the target OS for a native
+Linux or macOS binary. `make check` builds and vets every package; `make test`
+runs the full suite with the race detector. The
+[acceptance workflow](.github/workflows/acceptance.yml) runs those checks on
+Linux and macOS and retains each native binary as an artifact.
+
+Ordinary variables are scoped to an explicit environment. `variables list` and
+`variables get NAME` return the enclosing environment revision. Create/update
+inputs contain `name`, string `value` and that `revision`; deletion takes the
+variable name and an input containing `revision`. Empty string values are valid.
+Use the corresponding `input-schema get variables.create|update|delete` schema.
+These commands edit the same settings as the TUI environment JSON editor.
+
+```sh
+reqscope variables list --env staging --project ./my-api --output json
+reqscope variables create --env staging --input variable.json --project ./my-api --preview --output json
+reqscope variables update --env staging --input variable.json --project ./my-api --output json
+reqscope variables delete temporary --env staging --input revision.json --project ./my-api --output json
+reqscope environment delete obsolete --input revision.json --project ./my-api --preview --output json
+```
+
+`Space e x` confirms deletion of the selected environment. Deletion revokes its
+CLI grant and extraction approvals, clears its local selection, and retains OS
+credentials and production protection. Recreating the UUID requires fresh access
+approval and cannot lower production classification through CLI authoring.
+Cases and scenarios select environments at execution time and do not hold
+references to a deleted environment.
+
+Scenario execution records an aggregate `runId` plus individual records linked
+by `scenarioRunId` and `stepId`. Reports retain failures and skipped-step reasons.
+Pre-execution access/extraction denial returns exit 4 without starting a scenario
+history entry. A run that starts and then fails retains its report. `history get`
+returns at most 50 step summaries with `totalSteps` and `stepsTruncated`; inspect
+individual step run IDs for bounded exchange previews. The TUI history pane
+reopens the full aggregate. Pin a report and any step baselines you need to keep:
+step records and aggregates have independent retention, so pinning a report does
+not prevent its linked exchanges from being evicted. The report itself retains
+sanitized step exchanges. Aggregate reports cannot be associated with a case or
+compared as though they were case exchanges.
+
+Local fixtures do not certify a real backend or an OS credential service.
+See [release acceptance evidence and outstanding gates](docs/release-acceptance.md)
+for all 54 story mappings, the platform check and the manual backend procedure.

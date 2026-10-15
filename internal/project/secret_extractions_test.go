@@ -67,6 +67,25 @@ func TestProtectedScenarioLoginAndNoSecretOutputs(t *testing.T) {
 	if strings.Contains(string(raw), token) || strings.Contains(report.Steps[0].Exchange.Headers.Get("X-Echo"), token) {
 		t.Fatal("token leaked into report")
 	}
+	// Both adapters must retain the aggregate and link each actual exchange.
+	page, historyErr := project.History(root, "", 100, 0)
+	if historyErr != nil || page.Total != 3 {
+		t.Fatalf("want aggregate and two steps, got %+v %v", page, historyErr)
+	}
+	aggregate, historyErr := project.GetRun(root, report.RunID)
+	if historyErr != nil || aggregate.Scenario == nil || len(aggregate.Scenario.Steps) != 2 {
+		t.Fatalf("aggregate unavailable: %+v %v", aggregate, historyErr)
+	}
+	for _, step := range aggregate.Scenario.Steps {
+		recorded, e := project.GetRun(root, step.Exchange.RunID)
+		if e != nil || recorded.ScenarioRunID != report.RunID || recorded.StepID != step.ID || recorded.CaseID != step.CaseID {
+			t.Fatalf("step history not linked: %+v %v", recorded, e)
+		}
+		b, _ := json.Marshal(recorded)
+		if strings.Contains(string(b), token) {
+			t.Fatal("secret leaked into step history")
+		}
+	}
 	if credentials.Sanitize(token) != "[REDACTED]" {
 		t.Fatal("adapter redaction registry lost")
 	}
