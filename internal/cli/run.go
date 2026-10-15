@@ -27,6 +27,11 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint get ID
   schema list|get ID
   request send --env ID_OR_NAME --input FILE|- [--module MODULE] [--url URL] [--method METHOD]
+  history list [--case ID_OR_NAME] [--limit N] [--offset N]
+  history get|pin|unpin|delete RUN_ID
+  history associate RUN_ID --case ID_OR_NAME
+  history prune
+  history settings [--input FILE|-]
   case list|get ID_OR_NAME
   case create|update --input FILE|- [--preview]
   case duplicate|delete ID_OR_NAME --input FILE|- [--preview]
@@ -299,6 +304,9 @@ func execute(o options, in io.Reader) (any, error) {
 	}
 	if group == "scenario" {
 		return scenarioCommand(o, in)
+	}
+	if group == "history" {
+		return historyCommand(o, in)
 	}
 	if group == "case" {
 		return caseCommand(o, in)

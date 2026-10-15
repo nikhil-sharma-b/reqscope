@@ -128,7 +128,7 @@ func (m *Model) startSend(d project.RequestDraft, confirmation string) tea.Cmd {
 	validation := m.caseDraft.Validation
 	caseID, draft := m.caseDraft.ID, m.requestDirty() || m.caseDraft.ID == ""
 	return func() tea.Msg {
-		result, err := project.Send(ctx, root, env, d, project.SendOptions{Validation: validation, Interactive: true, Confirmation: confirmation, Credentials: m.credentials})
+		result, err := project.Send(ctx, root, env, d, project.SendOptions{CaseID: caseID, Draft: draft, Validation: validation, Interactive: true, Confirmation: confirmation, Credentials: m.credentials})
 		result.CaseID = caseID
 		result.Draft = draft
 		return exchangeMsg{result, err}
@@ -305,6 +305,9 @@ func (m *Model) requestOverlay() string {
 }
 func (m *Model) responseLines() []string {
 	if m.exchange.Status == 0 {
+		if m.exchange.RunID != "" {
+			return []string{"Run " + m.exchange.RunID, "Transport: " + m.exchange.Transport, m.exchange.Method + " " + m.exchange.Destination}
+		}
 		return []string{"No response recorded"}
 	}
 	b, _ := json.Marshal(m.exchange.Headers)

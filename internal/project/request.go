@@ -44,6 +44,8 @@ type RequestDraft struct {
 
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
+	CaseID          string
+	Draft           bool
 	confirmRedirect func(context.Context, PreparedRequest) (string, error)
 	captureResponse func(*Exchange) error
 	Validation      map[string]any
@@ -63,6 +65,7 @@ type PreparedRequest struct {
 	form           []preparedFormField
 }
 type Exchange struct {
+	RunID         string        `json:"runId,omitempty"`
 	Transport     string        `json:"transport"`
 	Checks        []CheckResult `json:"checks"`
 	CaseID        string        `json:"caseId,omitempty"`
@@ -399,11 +402,55 @@ func Send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	return send(ctx, root, env, d, opts, nil, false)
 }
 func send(ctx context.Context, root, env string, d RequestDraft, opts SendOptions, endpoint *Endpoint, snapshot bool) (result Exchange, err error) {
+	started := time.Now()
+	id := newRunID()
+	c := opts.Credentials
+	if c == nil {
+		c = DefaultCredentials
+	}
+	var p PreparedRequest
+	var used []localCredential
+	defer func() {
+		err = c.SanitizeError(err)
+		result.RunID = id
+		result.CaseID = opts.CaseID
+		result.Draft = opts.Draft || opts.CaseID == ""
+		if result.Transport == "" {
+			result.Transport = "not-started"
+		}
+		result.DurationMS = time.Since(started).Milliseconds()
+		if result.Method == "" {
+			result.Method = c.Sanitize(p.Method)
+		}
+		if result.Destination == "" {
+			result.Destination = c.Sanitize(SanitizedDestination(p.URL))
+		}
+		c.sanitizeExchange(&result, used)
+		request := c.historyRequestEvidence(p, d, used)
+		input, _ := json.Marshal(struct {
+			Draft      RequestDraft
+			Variables  map[string]string
+			Validation map[string]any
+		}{d, opts.Variables, opts.Validation})
+		inputDigest := Digest(input)
+		if p.Fingerprint != "" {
+			inputDigest = Digest([]byte(p.Fingerprint + inputDigest))
+		}
+		contract, _ := json.Marshal(endpoint)
+		r := Run{ID: id, CaseID: opts.CaseID, Environment: c.Sanitize(env), StartedAt: started.UTC(), InputDigest: inputDigest, ContractDigest: Digest(contract), Request: request, Response: result, Outcome: "completed"}
+		if err != nil {
+			r.Outcome = "failed"
+			r.Error = err.Error()
+		}
+		if e := c.recordRun(root, r); e != nil {
+			err = errors.Join(err, Fail("storage_error", "could not record run history"))
+		}
+	}()
 	v, err := decodeValidation(opts.Validation)
 	if err != nil {
 		return result, err
 	}
-	if !snapshot && v.ResponseSchema && d.EndpointID != "" {
+	if !snapshot && d.EndpointID != "" {
 		specs, e := Specifications(root)
 		if e != nil {
 			return result, e
@@ -425,12 +472,7 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	for name, value := range opts.Variables {
 		d.Variables[name] = value
 	}
-	c := opts.Credentials
-	if c == nil {
-		c = DefaultCredentials
-	}
-	defer func() { err = c.SanitizeError(err) }()
-	var p PreparedRequest
+
 	if snapshot {
 		if err = c.Refresh(root); err == nil {
 			p, err = prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true, c)
@@ -445,7 +487,7 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if opts.Interactive && p.Classification == "production" && opts.Confirmation != p.Fingerprint {
 		return Exchange{}, Fail("access_denied", "production send requires confirmation of the current request")
 	}
-	used, err := c.attach(root, env, p)
+	used, err = c.attach(root, env, p)
 	if err != nil {
 		return Exchange{}, err
 	}
@@ -543,14 +585,18 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	}
 	defer response.Body.Close()
 	b, err := io.ReadAll(io.LimitReader(response.Body, capBytes))
-	if err != nil {
-		return Exchange{Transport: "failed"}, transportError(ctx, err)
-	}
+	readErr := err
 	result = Exchange{Transport: "completed", Draft: true, Method: p.Method, Destination: p.URL, Status: response.StatusCode, DurationMS: time.Since(start).Milliseconds(), Headers: response.Header, Truncated: int64(len(b)) == capBytes && (response.ContentLength < 0 || response.ContentLength > capBytes)}
 	if int64(len(b)) == capBytes {
 		cancel()
 	}
 	result.RetainedBytes = len(b)
+	if readErr != nil {
+		result.Transport = "failed"
+		result.BodyWithheld = true
+		result.Truncated = true
+		return result, transportError(ctx, readErr)
+	}
 	result.Binary = !utf8.Valid(b) || strings.ContainsRune(string(b), 0) || binaryContentType(response.Header.Get("Content-Type"))
 	if !result.Binary {
 		result.Body = string(b)

@@ -21,13 +21,16 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
+var schemaNames = []string{"history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
 	props := map[string]any{"name": str}
 	required := []string{"name"}
 	switch name {
+	case "history.settings":
+		props = map[string]any{"perCase": map[string]any{"type": "integer", "minimum": 0}, "maxBytes": map[string]any{"type": "integer", "minimum": 0}}
+		required = []string{"perCase", "maxBytes"}
 	case "request.send":
 		props = map[string]any{}
 		for _, name := range []string{"endpointId", "module", "method", "url", "body", "bodyType", "contentType", "bodyFile"} {
@@ -131,6 +134,12 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "history.settings":
+		var v project.HistoryLimits
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
 	case "scenario.create", "scenario.update":
 		var v ScenarioInput
 		if err := project.Decode(b, &v); err != nil {

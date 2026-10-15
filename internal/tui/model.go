@@ -46,6 +46,9 @@ type Model struct {
 	credentials       *project.Credentials
 	credentialEntry   [7]string
 	credentialField   int
+	historyPage       project.HistoryPage
+	historyOffset     int
+	historyText       string
 	savedCases        []project.CaseResource
 	caseDraft         project.CaseResource
 	caseDelete        project.CaseResource
@@ -215,8 +218,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.requestCancel()
 			m.requestCancel = nil
 		}
-		if msg.result.Status != 0 {
+		if msg.result.RunID != "" || msg.result.Status != 0 {
 			m.exchange = msg.result
+			m.refreshHistory()
 			m.pane = responsePane
 			m.query = ""
 			m.index = 0
@@ -271,6 +275,9 @@ func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if handled, cmd := m.scenarioKey(msg); handled {
 		return m, cmd
+	}
+	if m.historyKey(msg) {
+		return m, nil
 	}
 	if handled, cmd := m.caseKey(msg); handled {
 		return m, cmd
@@ -560,6 +567,9 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 			return m, nil
 		}
 	}
+	if m.historyAction(action) {
+		return m, nil
+	}
 	if handled, cmd := m.scenarioAction(action); handled {
 		return m, cmd
 	}
@@ -620,10 +630,16 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 	case "pane-left":
 		m.query = ""
 		m.pane = (m.pane + paneID(len(panes)) - 1) % paneID(len(panes))
+		if m.pane == historyPane {
+			m.refreshHistory()
+		}
 		m.index = 0
 	case "pane-right":
 		m.query = ""
 		m.pane = (m.pane + 1) % paneID(len(panes))
+		if m.pane == historyPane {
+			m.refreshHistory()
+		}
 		m.index = 0
 	case "zoom":
 		m.zoom = !m.zoom
@@ -769,6 +785,9 @@ func (m *Model) environmentItems() []project.Resource {
 	return items
 }
 func (m *Model) items() []string {
+	if m.pane == historyPane {
+		return m.historyLines()
+	}
 	if m.pane == scenariosPane {
 		labels := []string{}
 		for _, s := range m.scenarioItems() {
@@ -915,7 +934,7 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		start := min(m.index, max(0, len(lines)-1))
 		body = strings.Join(lines[start:], "\n")
 	case historyPane:
-		body = "No runs recorded"
+		body = strings.Join(m.historyLines(), "\n")
 	case casesPane:
 		body = "No cases saved"
 		if items := m.caseItems(); len(items) > 0 {
@@ -986,6 +1005,9 @@ func (m *Model) View() tea.View {
 	}
 	base := fit(m.credentials.Sanitize(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches"), width, height)
 	overlay := m.environmentOverlay()
+	if m.overlay == "history-settings" {
+		overlay = "History retention JSON | Enter save | Esc cancel\n" + m.historyText + "\n" + m.status
+	}
 	if credentialOverlay := m.credentialOverlay(); credentialOverlay != "" {
 		overlay = credentialOverlay
 	}

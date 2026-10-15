@@ -63,6 +63,14 @@ func defaults() []Binding {
 		{"case-duplicate", "Duplicate selected case", []string{"<leader> c d"}},
 		{"case-delete", "Delete selected case", []string{"<leader> c x"}},
 		{"case-run", "Run selected case", []string{"<leader> c r"}},
+		{"history-pin", "Pin selected run", []string{"<leader> h p"}},
+		{"history-unpin", "Unpin selected run", []string{"<leader> h u"}},
+		{"history-delete", "Delete selected unpinned run", []string{"<leader> h x"}},
+		{"history-prune", "Prune unpinned history", []string{"<leader> h c"}},
+		{"history-next", "Next history page", []string{"<leader> h n"}},
+		{"history-previous", "Previous history page", []string{"<leader> h b"}},
+		{"history-settings", "Edit history retention JSON", []string{"<leader> h s"}},
+		{"history-associate", "Associate run with current saved case", []string{"<leader> h a"}},
 	}
 }
 func Bindings(c KeyConfig) ([]Binding, error) {
