@@ -16,7 +16,7 @@ import (
 // RefreshPreview describes a three-way merge without writing project resources.
 type RefreshPreview struct {
 	SourceID       string         `json:"sourceId"`
-	Token          string         `json:"token"`
+	Token          string         `json:"previewToken"`
 	CurrentDigest  string         `json:"currentDigest"`
 	IncomingDigest string         `json:"incomingDigest"`
 	Added          []Endpoint     `json:"added"`

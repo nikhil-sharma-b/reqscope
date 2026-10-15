@@ -4,7 +4,7 @@
 
 **Blocked by:** 07 — Import from Swagger UI and specification URLs; 08 — Save and maintain request cases; 16 — Author and export API contracts
 
-**Status:** in-progress
+**Status:** complete
 
 **Specification coverage:** User stories 31, 32, 33, 35, 42, 46.
 
@@ -15,7 +15,7 @@
 - [x] Destination or binding changes never gain access from refresh; relevant approvals are invalidated.
 - [x] TUI reloads clean external changes while preserving dirty buffers and offering reload/discard/manual reconciliation.
 - [x] Interrupted multi-resource refreshes recover consistently; readers see coherent state.
-- [ ] Tests exercise backend add/change/remove, local conflicts, preserved cases, relinking, stale previews, external invalid edits and interrupted apply.
+- [x] Tests exercise backend add/change/remove, local conflicts, preserved cases, relinking, stale previews, external invalid edits and interrupted apply.
 
 
 Implementation notes:
@@ -31,8 +31,11 @@ Implementation notes:
   offers explicit external-case reload or manual reconciliation.
 - Independent standards/spec review completed. Spec review caught dirty project
   draft loss and embedded Swagger identity loss; both were fixed and re-reviewed.
-- Completion is pending new regression tests. The invoked TDD skill requires
-  user confirmation of test seams; the proposed boundaries are project refresh/
-  case APIs, CLI commands and TUI update/view. Confirmation was requested in-session.
+- Regression tests exercise the confirmed project API, CLI command and TUI
+  update/view boundaries, including interrupted refresh recovery across 800 cases.
+- Regression tests found and fixed a stale clean case-editor buffer that could
+  overwrite external edits, and CLI redaction of the refresh token. The public
+  token field is `previewToken` so it remains usable in sanitized CLI output.
+- Final independent standards/spec reviews found no blocking issues.
 
 Validation: `make check` and `make test` passed, including the full race-enabled suite.

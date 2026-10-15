@@ -742,7 +742,7 @@ incoming documents.
 ```sh
 bin/reqscope spec refresh-preview SOURCE_ID --project ./my-api --output json
 bin/reqscope input-schema get spec.refresh-apply --output json
-# Save the returned token as {"token":"..."} in refresh.json.
+# Save the returned token as {"previewToken":"..."} in refresh.json.
 bin/reqscope spec refresh-apply SOURCE_ID --input refresh.json --project ./my-api --output json
 ```
 

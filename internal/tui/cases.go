@@ -262,4 +262,9 @@ func (m *Model) loadCaseDraft(c project.CaseResource) {
 	m.requestBaseline = m.requestText
 	m.caseMetadataDirty = false
 	m.requestFields = nil
+	if m.overlay == "case-edit" {
+		b, _ := json.Marshal(c.Case)
+		m.caseText = string(b)
+		m.caseTextBaseline = m.caseText
+	}
 }

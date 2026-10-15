@@ -27,7 +27,26 @@ for rediscovery. Follow-up review found no remaining material spec issues.
 `make check` passes. Existing project, CLI and TUI tests pass. The full
 race-enabled suite passed with `make test`.
 
-New regression tests remain pending confirmation of the test boundaries required
-by the invoked TDD skill. The ticket remains in progress until those tests cover
-backend changes, conflicts, disconnected cases and repair, stale previews,
-external edits and recovery.
+Regression tests cover the confirmed project API, CLI command and TUI update/view
+boundaries. Coverage includes add/change/remove, independent three-way merges,
+unresolved conflicts, saved input and body diagnostics, stable source/endpoint
+identity, disconnected cases, explicit relinking and independent conversion,
+stale previews after incoming/contract/case/environment changes, invalid external
+files, embedded Swagger refresh, protected credential rejection and approval
+revocation without changing environment destinations or credential bindings.
+
+A process interruption test kills a refresh writer after its journal is published.
+Public readers must recover the contract, tombstone and 800 disconnected cases
+before returning. It uses the same journal-observation approach as existing
+recovery coverage; interruption timing depends on process scheduling.
+
+TUI coverage verifies selected-source preview, cancellation, confirmation, stale
+and conflicting previews, clean external reload, dirty-buffer retention, explicit
+reconciliation and discard/reload. The regression suite exposed a clean case
+editor retaining stale JSON after polling; reloading now updates both the case
+and its open editor. CLI coverage exposed credential redaction of the generic
+`token` output key. Preview and apply now use `previewToken`, which survives
+sanitization and supports a complete CLI preview/apply cycle.
+
+Final independent review reported zero documented standards violations and zero
+material spec findings.
