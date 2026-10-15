@@ -17,19 +17,21 @@ import (
 
 // Specification retains the original bytes and normalized import base for refresh.
 type Specification struct {
-	ID          string            `json:"id" yaml:"id"`
-	ModuleID    string            `json:"moduleId" yaml:"moduleId"`
-	Mode        string            `json:"mode" yaml:"mode"`
-	Location    string            `json:"location" yaml:"location"`
-	Version     string            `json:"version" yaml:"version"`
-	Digest      string            `json:"digest" yaml:"digest"`
-	Documents   map[string][]byte `json:"documents" yaml:"documents"`
-	Base        map[string]any    `json:"base" yaml:"base"`
-	Endpoints   []Endpoint        `json:"endpoints" yaml:"endpoints"`
-	Schemas     []Schema          `json:"schemas" yaml:"schemas"`
-	Diagnostics []string          `json:"diagnostics" yaml:"diagnostics"`
-	Complete    bool              `json:"complete" yaml:"complete"`
-	Revision    string            `json:"revision" yaml:"-"`
+	LocalDocuments   map[string][]byte `json:"localDocuments,omitempty" yaml:"localDocuments,omitempty"`
+	DeletedEndpoints []Endpoint        `json:"deletedEndpoints,omitempty" yaml:"deletedEndpoints,omitempty"`
+	ID               string            `json:"id" yaml:"id"`
+	ModuleID         string            `json:"moduleId" yaml:"moduleId"`
+	Mode             string            `json:"mode" yaml:"mode"`
+	Location         string            `json:"location" yaml:"location"`
+	Version          string            `json:"version" yaml:"version"`
+	Digest           string            `json:"digest" yaml:"digest"`
+	Documents        map[string][]byte `json:"documents" yaml:"documents"`
+	Base             map[string]any    `json:"base" yaml:"base"`
+	Endpoints        []Endpoint        `json:"endpoints" yaml:"endpoints"`
+	Schemas          []Schema          `json:"schemas" yaml:"schemas"`
+	Diagnostics      []string          `json:"diagnostics" yaml:"diagnostics"`
+	Complete         bool              `json:"complete" yaml:"complete"`
+	Revision         string            `json:"revision" yaml:"-"`
 }
 type Endpoint struct {
 	Revision   string         `json:"revision" yaml:"-"`
@@ -50,17 +52,21 @@ type Schema struct {
 	Definition any    `json:"definition" yaml:"definition"`
 }
 type resolver struct {
-	root      string
-	documents map[string][]byte
-	parsed    map[string]any
-	bytes     int
-	nodes     int
-	fetch     func(string) ([]byte, error)
+	retainedOnly bool
+	root         string
+	documents    map[string][]byte
+	parsed       map[string]any
+	bytes        int
+	nodes        int
+	fetch        func(string) ([]byte, error)
 }
 
 func (r *resolver) read(name string) (any, error) {
 	if v, ok := r.parsed[name]; ok {
 		return v, nil
+	}
+	if r.retainedOnly {
+		return nil, Fail("invalid_input", "reference must target a retained source document")
 	}
 	if len(r.documents) >= 64 {
 		return nil, Fail("invalid_input", "reference file limit of 64 exceeded")

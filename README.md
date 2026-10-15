@@ -696,3 +696,39 @@ only. These results cannot establish equality of original content. Missing or
 evicted runs return `not_found`, CLI exit 3; unrelated or ad hoc runs return
 `invalid_input`, exit 2. A successful comparison exits 0 even when differences
 exist.
+
+### Local contract edits
+
+Use `endpoint create|update|delete` or `schema create|update|delete` with
+`--input FILE|-`. Input schemas are available under the corresponding names,
+for example `input-schema get schema.update`. Supply the `sourceId` and current
+`revision` from `spec inspect`, and set `importedEdit: true` to explicitly edit
+an imported contract. Endpoint edits target `path` and `method`; schema edits
+use `name`. Create and update take a complete operation or schema in `value`.
+The optional `document` selects a retained reference document instead of the
+source's root document. Referenced path items must be edited in their own document.
+
+Run with `--preview` to validate without writing and inspect `affectedCases`
+and `affectedScenarios`. Deleting an endpoint used by cases requires an explicit
+`reassignTo` endpoint ID in the same source. Schema references must be repaired
+before deletion. Updates retain resource IDs; creating an operation at a new path
+creates a new ID. Removed operations retain tombstones.
+
+Original documents, imported digest and resolved import base stay unchanged.
+Local authoritative documents are retained separately, including unknown
+extensions and references. Edits cannot change an existing operation's destination
+or authentication settings, and cannot fetch new references. Registered credential
+values are rejected before persistence or export.
+
+`spec export SOURCE_ID` returns `rootDocument` and a `documents` map containing
+only authoritative OpenAPI document text. Write each document under its retained
+key when sharing a local source bundle. Remote document keys retain their source
+URLs. Cases and scenarios are separate project resources and are not serialized
+into ordinary OpenAPI. Credentials, approvals and history are excluded.
+
+In the TUI, `Space d a` opens the local contract JSON editor. Set the edit intent,
+choose `create`, `update` or `delete`, and press Enter to preview affected cases
+and scenarios. Enter applies; Esc returns to editing. The selected endpoint or
+schema chooses the source, or the first source is used from other panes.
+`Space d o` copies the contract document bundle to the terminal clipboard and
+opens an inspection view.

@@ -26,6 +26,8 @@ const Usage = `Usage: reqscope [--project PATH] [--output json] COMMAND
   endpoint search [--query TEXT] [--method METHOD] [--tag TAG] [--group-by tag] [--limit N] [--offset N]
   endpoint get ID
   schema list|get ID
+  endpoint|schema create|update|delete --input FILE|- [--preview]
+  spec export SOURCE_ID
   request send --env ID_OR_NAME --input FILE|- [--module MODULE] [--url URL] [--method METHOD]
   compare BEFORE_RUN_ID AFTER_RUN_ID [--input IGNORE_RULES_FILE|-]
   history list [--case ID_OR_NAME] [--limit N] [--offset N]
@@ -372,7 +374,7 @@ func execute(o options, in io.Reader) (any, error) {
 		return project.Init(root, name, o.preview)
 	}
 	if group == "spec" || group == "endpoint" || group == "schema" {
-		return specificationCommand(o)
+		return specificationCommand(o, in)
 	}
 	if group != "project" && group != "environment" {
 		return nil, project.Fail("invalid_input", "unknown command %q; use --help", group)

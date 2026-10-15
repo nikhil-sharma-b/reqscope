@@ -74,6 +74,8 @@ type Model struct {
 	specs             []project.Specification
 	importPath        string
 	importPreview     project.Specification
+	contractText      string
+	contractPreview   project.ContractImpact
 	sourceCandidate   project.SourceCandidate
 	sourceDiscovery   project.SourceDiscovery
 	detail            string
@@ -329,6 +331,9 @@ func (m *Model) key(msg tea.KeyPressMsg) (tea.Model, tea.Cmd) {
 	if m.environmentUpdate(msg) {
 		return m, nil
 	}
+	if m.contractKey(msg) {
+		return m, nil
+	}
 	if m.sourceImportKey(msg) {
 		return m, nil
 	}
@@ -571,6 +576,12 @@ func (m *Model) action(action string, n int) (tea.Model, tea.Cmd) {
 			m.nextCount = n
 			return m, nil
 		}
+	}
+	if m.contractAction(action) {
+		if action == "contract-export" && m.overlay == "detail" {
+			return m, tea.SetClipboard(m.detail)
+		}
+		return m, nil
 	}
 	if m.historyAction(action) {
 		return m, nil
@@ -1032,6 +1043,9 @@ func (m *Model) View() tea.View {
 	if scenarioOverlay := m.scenarioOverlay(); scenarioOverlay != "" {
 		overlay = scenarioOverlay
 	}
+	if contractOverlay := m.contractOverlay(); contractOverlay != "" {
+		overlay = contractOverlay
+	}
 	if sourceOverlay := m.sourceImportOverlay(); sourceOverlay != "" {
 		overlay = sourceOverlay
 	}
@@ -1095,6 +1109,12 @@ func (m *Model) View() tea.View {
 }
 
 func (m *Model) contractItems() ([]string, []string) {
+	labels, details, _ := m.contractRows()
+	return labels, details
+}
+
+func (m *Model) contractRows() ([]string, []string, []string) {
+	sources := []string{}
 	labels := []string{}
 	details := []string{}
 	for _, s := range m.specs {
@@ -1104,6 +1124,7 @@ func (m *Model) contractItems() ([]string, []string) {
 				text := string(b) + "Source: " + s.Location + "\n" + strings.Join(s.Diagnostics, "\n")
 				if strings.Contains(strings.ToLower(text), strings.ToLower(m.query)) {
 					labels = append(labels, schema.Name)
+					sources = append(sources, s.ID)
 					details = append(details, text)
 				}
 			}
@@ -1140,10 +1161,11 @@ func (m *Model) contractItems() ([]string, []string) {
 				label = "[" + match.Group + "] " + label
 			}
 			labels = append(labels, label)
+			sources = append(sources, match.SourceID)
 			details = append(details, text)
 		}
 	}
 
-	return labels, details
+	return labels, details, sources
 }
 func (m *Model) contractDetails() []string { _, details := m.contractItems(); return details }
