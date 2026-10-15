@@ -2,17 +2,39 @@ package cli
 
 import (
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
+	"io"
 	"os"
 	"strconv"
 	"strings"
 )
 
-func specificationCommand(o options) (any, error) {
+func specificationCommand(o options, in io.Reader) (any, error) {
 	root, err := rootPath(o)
 	if err != nil {
 		return nil, err
 	}
 	group, action := o.args[0], o.args[1]
+	if (group == "endpoint" || group == "schema") && (action == "create" || action == "update" || action == "delete") {
+		if len(o.args) != 2 {
+			return nil, project.Fail("invalid_input", "contract edits require --input and no positional arguments")
+		}
+		b, err := input(o, in)
+		if err != nil {
+			return nil, err
+		}
+		value, err := validateInput(group+"."+action, b)
+		if err != nil {
+			return nil, err
+		}
+		return project.EditContract(root, group, action, value.(project.ContractEdit), o.preview, o.credentials)
+	}
+	if group == "spec" && action == "export" {
+		if len(o.args) != 3 {
+			return nil, project.Fail("invalid_input", "spec export requires a source ID")
+		}
+		return project.ExportContract(root, o.args[2], o.credentials)
+	}
+
 	if group == "endpoint" && (action == "search" || action == "list") {
 		return endpointSearch(root, o, action == "search")
 	}

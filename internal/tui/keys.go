@@ -22,6 +22,7 @@ type KeyConfig struct {
 
 func defaults() []Binding {
 	return []Binding{
+		{"contract-author", "Author local contract edit", []string{"<leader> d a"}}, {"contract-export", "Export contract documents to clipboard", []string{"<leader> d o"}},
 		{"import", "Import local specification", []string{"<leader> s i"}}, {"schemas", "Inspect schemas", []string{"<leader> s s"}},
 		{"down", "Move down", []string{"j", "down"}}, {"up", "Move up", []string{"k", "up"}},
 		{"first", "First item", []string{"g g"}}, {"last", "Last item", []string{"G"}},

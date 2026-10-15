@@ -21,13 +21,28 @@ type EnvironmentInput struct {
 	Revision            string `json:"revision,omitempty" yaml:"revision,omitempty"`
 }
 
-var schemaNames = []string{"comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
+var schemaNames = []string{"endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete", "comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
 	props := map[string]any{"name": str}
 	required := []string{"name"}
 	switch name {
+	case "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete":
+		props = map[string]any{"sourceId": map[string]any{"type": "string", "format": "uuid"}, "revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}, "importedEdit": map[string]any{"type": "boolean"}, "document": str, "value": map[string]any{}, "reassignTo": map[string]any{"type": "string", "format": "uuid"}}
+		required = []string{"sourceId", "revision", "importedEdit"}
+		if strings.HasPrefix(name, "endpoint.") {
+			props["path"] = str
+			props["method"] = map[string]any{"type": "string", "enum": []string{"GET", "PUT", "POST", "DELETE", "OPTIONS", "HEAD", "PATCH", "TRACE", "get", "put", "post", "delete", "options", "head", "patch", "trace"}}
+			required = append(required, "path", "method")
+		} else {
+			props["name"] = str
+			required = append(required, "name")
+		}
+		if !strings.HasSuffix(name, ".delete") {
+			required = append(required, "value")
+		}
+
 	case "comparison.ignore":
 		return project.ComparisonIgnoreSchema(), nil
 	case "history.settings":
@@ -136,6 +151,15 @@ func validateInput(name string, b []byte) (any, error) {
 		return nil, err
 	}
 	switch name {
+	case "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete":
+		var v project.ContractEdit
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		if !v.ImportedEdit {
+			return nil, project.Fail("access_denied", "importedEdit must be true")
+		}
+		return v, nil
 	case "comparison.ignore":
 		var v project.IgnoreRules
 		if err := project.Decode(b, &v); err != nil {
@@ -339,6 +363,10 @@ func validateNode(node *yaml.Node, rule map[string]any, path string) error {
 			if err := validateNode(child, propertyMap(rule["items"]), path+"[]"); err != nil {
 				return err
 			}
+		}
+	case "boolean":
+		if node.Kind != yaml.ScalarNode || node.Tag != "!!bool" {
+			return fail()
 		}
 	case "integer":
 		if node.Kind != yaml.ScalarNode || node.Tag != "!!int" {
