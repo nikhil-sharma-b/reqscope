@@ -575,3 +575,41 @@ cancels. Enter saves the editor; Esc cancels editing. Production requires a
 confirmation showing method and sanitized URL before each step send. Esc at
 that prompt cancels the whole scenario. A shared-case save shows affected
 scenarios and asks for confirmation before writing.
+
+Secure login chaining
+--------------------
+
+Use `secretExtracts` for login tokens. For example, a login step can declare:
+
+```json
+"secretExtracts": {
+  "session": {
+    "pointer": "/data/session",
+    "destinations": [
+      {"kind":"bearer", "module":"api", "destination":"https://api.example.com/me", "in":"header", "field":"Authorization"}
+    ]
+  }
+}
+```
+
+A later step binds its `auth` variable to `{"stepId":"login","extract":"session"}`
+and sets its Authorization header to `{{auth}}`. The runner inserts the Bearer
+prefix. API keys use `kind: "api-key"` and a header, query or body placement.
+All destinations for one token use the same kind. Body placement authorizes
+that exact destination's body and uses an empty `field`.
+
+In the TUI, select the scenario and press `<leader> s a`. Review the JSON
+Pointer, source cases, permitted exact destination URLs and placements, and
+active environment. Press `y` to approve or Esc to cancel. CLI commands can
+prepare candidate metadata and run approved scenarios, but cannot approve it.
+Changing a scenario, source case, contract or environment settings requires
+fresh TUI approval. CLI environment access still needs its separate approval.
+
+Tokens are registered before response checks or output, passed downstream as
+opaque references, and discarded as usable credentials when the run ends.
+They are never saved to the OS credential store or environment variables.
+Redaction knowledge remains in memory for later output in the same process.
+Approved pointers remain protected throughout their environment, including
+ordinary scenarios and direct requests. This conservatively hides matching
+fields in other responses too. Missing, non-string, empty or incomplete token
+extracts fail the producer and prevent dependent sends.

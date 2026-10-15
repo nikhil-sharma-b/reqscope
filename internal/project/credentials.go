@@ -45,8 +45,9 @@ type CredentialBinding struct {
 }
 type localCredential struct {
 	CredentialBinding
-	Key     string `json:"key"`
-	Session bool   `json:"session"`
+	Destinations []CredentialBinding `json:"destinations,omitempty"`
+	Key          string              `json:"key"`
+	Session      bool                `json:"session"`
 }
 type SecretState struct {
 	Name       string `json:"name"`
@@ -56,10 +57,11 @@ type SecretState struct {
 // Credentials keeps session values and a process-lifetime redaction registry.
 // There is deliberately no public value getter.
 type Credentials struct {
-	mu      sync.Mutex
-	store   CredentialStore
-	session map[string]string
-	known   map[string]bool
+	mu        sync.Mutex
+	store     CredentialStore
+	session   map[string]string
+	known     map[string]bool
+	transient map[string]localCredential
 }
 
 func NewCredentials(store CredentialStore) *Credentials {
@@ -256,7 +258,7 @@ func credentialItems(root, env string) (map[string]localCredential, error) {
 	return a.Credentials[e.ID], nil
 }
 func (c *Credentials) Inspect(root, env string) ([]SecretState, error) {
-	items, err := credentialItems(root, env)
+	items, err := c.items(root, env)
 	if err != nil {
 		return nil, err
 	}
@@ -305,7 +307,22 @@ func checkSecretPosition(items map[string]localCredential, review AccessReview, 
 		}
 		bound, _ := Origin(item.Destination)
 		bu, _ := url.Parse(item.Destination)
-		if review.Bindings[item.Name] != Digest(data) || item.Module != module || origin != bound || u.EscapedPath() != bu.EscapedPath() || item.In != in || item.Field != field {
+		permitted := item.Module == module && origin == bound && u.EscapedPath() == bu.EscapedPath() && item.In == in && item.Field == field
+		if len(item.Destinations) > 0 {
+			permitted = false
+			for _, destination := range item.Destinations {
+				targetOrigin, _ := Origin(destination.Destination)
+				targetURL, _ := url.Parse(destination.Destination)
+				path := targetURL.EscapedPath()
+				if path == "" {
+					path = "/"
+				}
+				if destination.Module == module && targetOrigin == origin && path == u.EscapedPath() && destination.In == in && destination.Field == field && destination.Kind == item.Kind {
+					permitted = true
+				}
+			}
+		}
+		if review.Bindings[item.Name] != Digest(data) || !permitted {
 			return Fail("access_denied", "credential destination or placement is outside its protected binding")
 		}
 		if in != "body" && text != match[0] {
@@ -314,11 +331,12 @@ func checkSecretPosition(items map[string]localCredential, review AccessReview, 
 	}
 	return nil
 }
-func validateCredentials(root, env string, review AccessReview, req *http.Request, d RequestDraft) error {
-	items, err := credentialItems(root, env)
+func (c *Credentials) validateCredentials(root, env string, review AccessReview, req *http.Request, d RequestDraft) error {
+	items, err := c.items(root, env)
 	if err != nil {
 		return err
 	}
+	review = c.bindingReview(review)
 	// URL references are forbidden even if they appear in an inline query. Use explicit query fields.
 	for _, raw := range []string{d.URL, req.URL.Scheme, req.URL.Host, req.URL.Path, d.ContentType, d.Method, d.Module} {
 		if strings.Contains(raw, "{{secret:") {
@@ -373,14 +391,14 @@ func protectedHeader(name string) bool {
 	return false
 }
 func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCredential, error) {
-	items, err := credentialItems(root, env)
+	items, err := c.items(root, env)
 	if err != nil {
 		return nil, err
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	used := []localCredential{}
-	expand := func(text string, jsonEscape bool) (string, error) {
+	expand := func(text string, jsonEscape bool, in, field string) (string, error) {
 		var failure error
 		result := secretReference.ReplaceAllStringFunc(text, func(ref string) string {
 			item := items[secretReference.FindStringSubmatch(ref)[1]]
@@ -389,7 +407,10 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 				failure = err
 				return ""
 			}
-			used = append(used, item)
+			position := item
+			position.In = in
+			position.Field = field
+			used = append(used, position)
 			if item.Kind == "bearer" {
 				v = "Bearer " + v
 			}
@@ -407,7 +428,7 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 	}
 	for name, values := range p.request.Header {
 		for i, v := range values {
-			values[i], err = expand(v, false)
+			values[i], err = expand(v, false, "header", name)
 			if err != nil {
 				return nil, err
 			}
@@ -417,7 +438,7 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 	q := p.request.URL.Query()
 	for name, values := range q {
 		for i, v := range values {
-			values[i], err = expand(v, false)
+			values[i], err = expand(v, false, "query", name)
 			if err != nil {
 				return nil, err
 			}
@@ -431,7 +452,7 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 			if fields[i].File != "" {
 				continue
 			}
-			fields[i].Value, err = expand(fields[i].Value, false)
+			fields[i].Value, err = expand(fields[i].Value, false, "body", "")
 			if err != nil {
 				return nil, err
 			}
@@ -451,7 +472,7 @@ func (c *Credentials) attach(root, env string, p PreparedRequest) ([]localCreden
 	if err != nil {
 		return nil, err
 	}
-	body, err = expand(body, p.draft.BodyType == "json" || strings.HasSuffix(strings.Split(p.draft.ContentType, ";")[0], "json"))
+	body, err = expand(body, p.draft.BodyType == "json" || strings.HasSuffix(strings.Split(p.draft.ContentType, ";")[0], "json"), "body", "")
 	if err != nil {
 		return nil, err
 	}

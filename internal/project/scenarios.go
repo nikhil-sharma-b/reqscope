@@ -18,11 +18,12 @@ type ScenarioBinding struct {
 	Extract string `json:"extract" yaml:"extract"`
 }
 type ScenarioStep struct {
-	ID        string                     `json:"id" yaml:"id"`
-	CaseID    string                     `json:"caseId" yaml:"caseId"`
-	Overrides map[string]string          `json:"overrides,omitempty" yaml:"overrides,omitempty"`
-	Extracts  map[string]string          `json:"extracts,omitempty" yaml:"extracts,omitempty"`
-	Bindings  map[string]ScenarioBinding `json:"bindings,omitempty" yaml:"bindings,omitempty"`
+	ID             string                      `json:"id" yaml:"id"`
+	CaseID         string                      `json:"caseId" yaml:"caseId"`
+	Overrides      map[string]string           `json:"overrides,omitempty" yaml:"overrides,omitempty"`
+	SecretExtracts map[string]SecretExtraction `json:"secretExtracts,omitempty" yaml:"secretExtracts,omitempty"`
+	Extracts       map[string]string           `json:"extracts,omitempty" yaml:"extracts,omitempty"`
+	Bindings       map[string]ScenarioBinding  `json:"bindings,omitempty" yaml:"bindings,omitempty"`
 }
 type Scenario struct {
 	ID                string         `json:"id" yaml:"id"`
@@ -47,6 +48,22 @@ func ValidateScenario(s Scenario) error {
 		if _, ok := seen[step.ID]; ok {
 			return Fail("invalid_input", "duplicate scenario step id")
 		}
+		for name, extraction := range step.SecretExtracts {
+			if !secretName.MatchString(name) || !validPointer(extraction.Pointer) || len(extraction.Destinations) == 0 {
+				return Fail("invalid_input", "secret extraction requires a name, JSON Pointer and destinations")
+			}
+			if _, ok := step.Extracts[name]; ok {
+				return Fail("invalid_input", "extraction names must be unique")
+			}
+			for _, b := range extraction.Destinations {
+				if b.Kind != extraction.Destinations[0].Kind {
+					return Fail("invalid_input", "all extraction destinations must use the same authentication kind")
+				}
+				if err := validateExtractionDestination(b); err != nil {
+					return err
+				}
+			}
+		}
 		for name, pointer := range step.Extracts {
 			if strings.TrimSpace(name) == "" || !validPointer(pointer) {
 				return Fail("invalid_input", "invalid ordinary JSON Pointer extraction")
@@ -57,7 +74,8 @@ func ValidateScenario(s Scenario) error {
 			if strings.TrimSpace(name) == "" || !ok {
 				return Fail("invalid_input", "bindings must reference an earlier producer step")
 			}
-			if _, ok := producer.Extracts[b.Extract]; !ok {
+			_, ordinary := producer.Extracts[b.Extract]
+			if _, secret := producer.SecretExtracts[b.Extract]; !ordinary && !secret {
 				return Fail("invalid_input", "binding references an undeclared producer extract")
 			}
 		}
@@ -289,6 +307,9 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 	if c == nil {
 		c = DefaultCredentials
 	}
+	parent := c
+	c = c.forRun()
+	defer c.releaseRun(parent)
 	defer func() {
 		if err != nil {
 			report.Successful = false
@@ -316,6 +337,9 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 				return report, err
 			}
 		}
+	}
+	if err := run.checkExtractionApproval(root, env); err != nil {
+		return report, err
 	}
 	values := map[string]map[string]string{}
 	outcomes := map[string]string{}
@@ -368,6 +392,10 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 		sendOpts.Validation = input.source.Validation
 		sendOpts.Credentials = c
 		sendOpts.Confirmation = ""
+		secretValues := map[string]string{}
+		if len(step.SecretExtracts) > 0 {
+			sendOpts.captureResponse = func(ex *Exchange) error { return c.captureSecrets(step, ex, secretValues) }
+		}
 		d := CloneDraft(input.source.Request)
 		// A contract snapshot is used for construction and checks; access stays live.
 		var stepErr error
@@ -378,6 +406,9 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 				confirmationFailed = err != nil || fingerprint != p.Fingerprint
 				return fingerprint, err
 			}
+		}
+		if e := run.checkExtractionApproval(root, env); e != nil {
+			return report, e
 		}
 		p, e := prepareScenarioRequest(root, env, d, sendOpts, input.endpoint)
 		if e != nil {
@@ -398,7 +429,7 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 		}
 		item.Exchange.CaseID = input.source.ID
 		item.Exchange.Draft = false
-		extracted := map[string]string{}
+		extracted := secretValues
 		if stepErr == nil && len(step.Extracts) > 0 {
 			body, e := jsonValue(item.Exchange.Body)
 			for name, pointer := range step.Extracts {
@@ -468,7 +499,7 @@ func prepareScenarioRequest(root, env string, d RequestDraft, opts SendOptions, 
 	for k, v := range opts.Variables {
 		d.Variables[k] = v
 	}
-	p, err := prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true)
+	p, err := prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true, opts.Credentials)
 	p.URL = opts.Credentials.Sanitize(p.URL)
 	return p, opts.Credentials.SanitizeError(err)
 }

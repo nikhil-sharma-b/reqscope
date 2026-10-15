@@ -45,6 +45,7 @@ type RequestDraft struct {
 // SendOptions is supplied by adapters, never decoded from request input.
 type SendOptions struct {
 	confirmRedirect func(context.Context, PreparedRequest) (string, error)
+	captureResponse func(*Exchange) error
 	Validation      map[string]any
 	Variables       map[string]string
 	Credentials     *Credentials
@@ -154,14 +155,14 @@ func PrepareRequestWithCredentials(root, env string, d RequestDraft, interactive
 	if err := c.Refresh(root); err != nil {
 		return PreparedRequest{}, err
 	}
-	p, err := prepareRequest(root, env, d, interactive)
+	p, err := prepareRequestSnapshot(root, env, d, interactive, nil, false, c)
 	p.URL = c.Sanitize(p.URL)
 	return p, c.SanitizeError(err)
 }
 func prepareRequest(root, env string, d RequestDraft, interactive bool) (PreparedRequest, error) {
 	return prepareRequestSnapshot(root, env, d, interactive, nil, false)
 }
-func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, endpoint *Endpoint, snapshot bool) (PreparedRequest, error) {
+func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, endpoint *Endpoint, snapshot bool, credentials ...*Credentials) (PreparedRequest, error) {
 	var p PreparedRequest
 	if !interactive && strings.TrimSpace(env) == "" {
 		return p, Fail("access_denied", "every CLI network run requires explicit --env")
@@ -369,7 +370,11 @@ func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, 
 			credentialDraft.Form[i] = f.FormField
 		}
 	}
-	if err := validateCredentials(root, env, r, req, credentialDraft); err != nil {
+	c := DefaultCredentials
+	if len(credentials) > 0 {
+		c = credentials[0]
+	}
+	if err := c.validateCredentials(root, env, r, req, credentialDraft); err != nil {
 		return p, err
 	}
 	data, _ := json.Marshal(struct {
@@ -428,7 +433,7 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	var p PreparedRequest
 	if snapshot {
 		if err = c.Refresh(root); err == nil {
-			p, err = prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true)
+			p, err = prepareRequestSnapshot(root, env, d, opts.Interactive, endpoint, true, c)
 			p.URL = c.Sanitize(p.URL)
 		}
 	} else {
@@ -513,12 +518,12 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 				return Fail("access_denied", "environment changed during redirect confirmation")
 			}
 		}
-		items, err := credentialItems(root, env)
+		items, err := c.items(root, env)
 		if err != nil {
 			return err
 		}
 		for _, item := range used {
-			if err := checkSecretPosition(items, current, credentialPosition{Destination: req.URL.String(), Module: p.draft.Module, In: item.In, Field: item.Field}, "{{secret:"+item.Name+"}}"); err != nil {
+			if err := checkSecretPosition(items, c.bindingReview(current), credentialPosition{Destination: req.URL.String(), Module: p.draft.Module, In: item.In, Field: item.Field}, "{{secret:"+item.Name+"}}"); err != nil {
 				return err
 			}
 		}
@@ -550,8 +555,25 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 	if !result.Binary {
 		result.Body = string(b)
 	}
+	var captureErr error
+	if opts.captureResponse != nil {
+		captureErr = opts.captureResponse(&result)
+	}
+	redactProtected, protectErr := c.protectResponse(root, env, &result)
+	if protectErr != nil {
+		result.Body = ""
+		result.Headers = http.Header{}
+		result.BodyWithheld = true
+		return result, protectErr
+	}
 	result.Checks = responseChecks(result, v, endpoint)
+	if redactProtected != nil {
+		redactProtected()
+	}
 	c.sanitizeExchange(&result, used)
+	if captureErr != nil {
+		return result, captureErr
+	}
 	for _, check := range result.Checks {
 		if check.Outcome != "passed" {
 			return result, Fail("check_failed", "Response checks failed or are incomplete")

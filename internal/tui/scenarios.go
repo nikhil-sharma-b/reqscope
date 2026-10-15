@@ -46,7 +46,7 @@ func (m *Model) scenarioAction(action string) (bool, tea.Cmd) {
 		m.overlay = "scenario-edit"
 		m.mode = "INSERT"
 		m.pane = scenariosPane
-	case "scenario-edit", "scenario-delete", "scenario-validate", "scenario-run":
+	case "scenario-edit", "scenario-delete", "scenario-validate", "scenario-run", "scenario-approve-extractions":
 		if m.requestCancel != nil {
 			m.status = "Cancel the running request or scenario first"
 			return true, nil
@@ -77,6 +77,15 @@ func (m *Model) scenarioAction(action string) (bool, tea.Cmd) {
 			} else {
 				m.status = "Scenario valid; execution access checked separately"
 			}
+		case "scenario-approve-extractions":
+			review, err := project.ReviewScenarioExtractions(m.root, m.activeEnvironment, s.ID)
+			if err != nil {
+				m.status = err.Error()
+				return true, nil
+			}
+			b, _ := json.MarshalIndent(review, "", "  ")
+			m.scenarioText = string(b)
+			m.overlay = "scenario-approve-extractions"
 		case "scenario-run":
 			run, err := project.SnapshotScenario(m.root, s.ID)
 			if err != nil {
@@ -127,6 +136,24 @@ func (m *Model) awaitScenario() tea.Cmd {
 }
 func (m *Model) scenarioKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 	switch m.overlay {
+	case "scenario-approve-extractions":
+		switch msg.String() {
+		case "esc", "ctrl+c":
+			m.overlay = ""
+		case "y":
+			var review project.ExtractionReview
+			if err := json.Unmarshal([]byte(m.scenarioText), &review); err != nil {
+				m.status = "Invalid extraction review"
+				return true, nil
+			}
+			if err := project.ApproveScenarioExtractions(m.root, m.activeEnvironment, m.scenarioDraft.ID, review.Fingerprint); err != nil {
+				m.status = err.Error()
+			} else {
+				m.overlay = ""
+				m.status = "Protected extractions approved for this scenario and environment"
+			}
+		}
+		return true, nil
 	case "scenario-confirm":
 		switch msg.String() {
 		case "y":
@@ -191,6 +218,8 @@ func (m *Model) scenarioKey(msg tea.KeyPressMsg) (bool, tea.Cmd) {
 }
 func (m *Model) scenarioOverlay() string {
 	switch m.overlay {
+	case "scenario-approve-extractions":
+		return "Approve protected JSON Pointer extractions and permitted destinations?\ny approve | Esc cancel\n" + m.scenarioText + "\n" + m.status
 	case "scenario-edit":
 		return "Edit scenario JSON | Ctrl+u clear | Enter save | Esc cancel\n" + m.scenarioText + "\n" + m.status
 	case "scenario-delete":
