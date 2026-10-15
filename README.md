@@ -613,3 +613,41 @@ Approved pointers remain protected throughout their environment, including
 ordinary scenarios and direct requests. This conservatively hides matching
 fields in other responses too. Missing, non-string, empty or incomplete token
 extracts fail the producer and prevent dependent sends.
+
+Run history
+-----------
+
+Every request send records a sanitized result in local SQLite, including failed
+sends. Saved-case runs carry their case ID; ad hoc runs receive standalone IDs.
+History is stored beside local access state in a separate `reqscope/history`
+directory under the OS user data directory, keyed by project ID and location.
+Project files and project inspection output exclude history and credentials.
+
+```
+reqscope history list --limit 50 --offset 0
+reqscope history list --case CASE_ID_OR_NAME
+reqscope history get RUN_ID
+reqscope history pin RUN_ID
+reqscope history unpin RUN_ID
+reqscope history delete RUN_ID
+reqscope history associate RUN_ID --case CASE_ID_OR_NAME
+reqscope history prune
+reqscope history settings
+reqscope history settings --input limits.json
+```
+
+Settings input requires `{"perCase":100,"maxBytes":104857600}`. Defaults keep
+100 unpinned runs per saved case and 100 MiB of unpinned evidence per project.
+Cleanup runs after sends, settings changes and unpinning. It evicts oldest
+unpinned runs first. Pins survive cleanup, cannot be explicitly deleted until
+unpinned, and report their total size and whether it exceeds the project limit.
+Zero limits remove all applicable unpinned runs. Limits count serialized evidence
+bytes; SQLite indexes and page overhead add disk space beyond that amount.
+
+List output omits bodies and response details; get limits each body preview to
+4096 bytes and bounds header and check previews. The TUI reopens retained results
+with Enter from `g h`. History pages contain 50 entries. Leader actions under
+`h` are `n` next page, `b` previous page, `p` pin, `u` unpin, `x` delete,
+`c` cleanup, `s` edit retention JSON and `a` associate with the current saved case.
+Request body evidence is capped at 1 MiB. Uploads and bodies that cannot be safely
+reopened retain metadata. Binary and incomplete unsafe bodies are withheld.

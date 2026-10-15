@@ -240,6 +240,7 @@ func SendCase(ctx context.Context, root, env, selector string, overrides map[str
 	if err != nil {
 		return Exchange{}, err
 	}
+	opts.CaseID = c.ID
 	opts.Validation = c.Validation
 	opts.Variables = overrides
 	result, err := Send(ctx, root, env, c.Request, opts)

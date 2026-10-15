@@ -15,4 +15,4 @@ Verified on 2026-10-13 using upstream documentation and tagged Go module metadat
 
 Bubble Tea v2.1.0 and the selected x/sys and x/term versions require Go 1.26.0, so that is the application's minimum. No implementation code was copied from jira-tui; its interaction patterns informed the specification. Dependency licenses are retained in upstream modules.
 
-SQLite and full OpenAPI validation remain deferred. Credential tests substitute only the OS store boundary; production uses go-keyring with no file fallback.
+Local history uses modernc.org/sqlite v1.46.1, a pure Go SQLite driver through database/sql. It builds without a C toolchain. Full OpenAPI validation remains deferred. Credential tests substitute only the OS store boundary; production uses go-keyring with no file fallback.

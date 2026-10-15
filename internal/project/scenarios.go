@@ -422,6 +422,7 @@ func (run *ScenarioRun) Run(ctx context.Context, root, env string, opts Scenario
 			}
 		}
 		if stepErr == nil {
+			sendOpts.CaseID = input.source.ID
 			item.Exchange, stepErr = send(ctx, root, env, d, sendOpts, input.endpoint, true)
 		}
 		if item.Exchange.Transport == "completed" || item.Exchange.Transport == "failed" {
