@@ -40,3 +40,8 @@ Implementation and evidence:
 - All 54 stories, automated evidence, known limits and manual acceptance steps
   are recorded in `docs/release-acceptance.md`. README covers installation and
   the delivered operations. Review results are in `docs/release-acceptance-review.md`.
+
+- Independent standards and specification reviews completed. The initial
+  unbounded scenario execution output finding was fixed with a failing-then-passing
+  regression test; both follow-up reviews report zero remaining implementation
+  findings. Full race tests and builds passed again after the fixes.
