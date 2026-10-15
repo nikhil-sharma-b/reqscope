@@ -148,7 +148,7 @@ func validateChanges(changes []Change) error {
 		}
 		seen[c.Path] = true
 		if c.Delete {
-			if (filepath.Dir(c.Path) != "cases" && filepath.Dir(c.Path) != "scenarios") || c.ExpectedRevision == "" || len(c.Content) != 0 {
+			if (filepath.Dir(c.Path) != "cases" && filepath.Dir(c.Path) != "scenarios" && filepath.Dir(c.Path) != "environments") || c.ExpectedRevision == "" || len(c.Content) != 0 {
 				return Fail("invalid_input", "invalid resource deletion")
 			}
 			continue
@@ -369,6 +369,9 @@ func commitProtected(root string, changes []Change, preview, confirmLower bool) 
 	}
 	if preview {
 		return nil
+	}
+	if err := revokeDeletedEnvironmentAccess(root, changes); err != nil {
+		return err
 	}
 	b, err := json.Marshal(transaction{1, changes})
 	if err != nil {

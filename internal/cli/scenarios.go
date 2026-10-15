@@ -71,7 +71,9 @@ func scenarioCommand(o options, in io.Reader) (any, error) {
 		}
 		ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 		defer stop()
-		return project.RunScenario(ctx, root, o.env, o.args[2], project.ScenarioOptions{SendOptions: project.SendOptions{Credentials: o.credentials, Variables: variables}})
+		report, err := project.RunScenario(ctx, root, o.env, o.args[2], project.ScenarioOptions{SendOptions: project.SendOptions{Credentials: o.credentials, Variables: variables}})
+		bounded := project.PreviewRun(project.Run{Scenario: &report}, 0)
+		return bounded.Scenario, err
 	}
 	return nil, project.Fail("invalid_input", "unknown scenario operation")
 }

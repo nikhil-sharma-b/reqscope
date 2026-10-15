@@ -16,17 +16,21 @@ import (
 
 // Run contains only sanitized evidence. IDs and evidence never change after insertion.
 type Run struct {
-	ID             string    `json:"id"`
-	CaseID         string    `json:"caseId,omitempty"`
-	Environment    string    `json:"environment"`
-	StartedAt      time.Time `json:"startedAt"`
-	InputDigest    string    `json:"inputDigest"`
-	ContractDigest string    `json:"contractDigest"`
-	Outcome        string    `json:"outcome"`
-	Error          string    `json:"error,omitempty"`
-	Request        Exchange  `json:"request"`
-	Response       Exchange  `json:"response"`
-	Pinned         bool      `json:"pinned"`
+	ScenarioID     string          `json:"scenarioId,omitempty"`
+	Scenario       *ScenarioReport `json:"scenario,omitempty"`
+	ScenarioRunID  string          `json:"scenarioRunId,omitempty"`
+	StepID         string          `json:"stepId,omitempty"`
+	ID             string          `json:"id"`
+	CaseID         string          `json:"caseId,omitempty"`
+	Environment    string          `json:"environment"`
+	StartedAt      time.Time       `json:"startedAt"`
+	InputDigest    string          `json:"inputDigest"`
+	ContractDigest string          `json:"contractDigest"`
+	Outcome        string          `json:"outcome"`
+	Error          string          `json:"error,omitempty"`
+	Request        Exchange        `json:"request"`
+	Response       Exchange        `json:"response"`
+	Pinned         bool            `json:"pinned"`
 }
 type HistoryLimits struct {
 	PerCase  int   `json:"perCase" yaml:"perCase"`
@@ -145,6 +149,7 @@ func History(root, caseID string, limit, offset int) (page HistoryPage, err erro
 			if e != nil {
 				return e
 			}
+			r.Scenario = nil
 			r.Request.Body = ""
 			r.Request.Headers = nil
 			r.Response.Body = ""
@@ -199,6 +204,13 @@ func ChangeRun(root, id, action, caseID string) error {
 		case "delete":
 			res, err = db.Exec("DELETE FROM runs WHERE id=? AND pinned=0", id)
 		case "associate":
+			r, e := scanRun(db.QueryRow("SELECT id,case_id,pinned,evidence FROM runs WHERE id=?", id))
+			if e != nil {
+				return e
+			}
+			if r.Scenario != nil {
+				return Fail("invalid_input", "scenario reports cannot be associated with a case")
+			}
 			items, e := cases(root)
 			if e != nil {
 				return e
@@ -242,11 +254,35 @@ func newRunID() string { return uuid.NewString() }
 
 // PreviewRun bounds text exposed by automated history inspection.
 func PreviewRun(r Run, bodyBytes int) Run {
+
 	clip := func(s string, n int) string {
 		if len(s) > n {
 			return strings.ToValidUTF8(s[:n], "�")
 		}
 		return s
+	}
+	if r.Scenario != nil {
+		report := *r.Scenario
+		if len(report.Steps) > 50 {
+			report.Steps = report.Steps[:50]
+			report.StepsTruncated = true
+		}
+		report.Steps = append([]ScenarioStepReport(nil), report.Steps...)
+		// Aggregate inspection returns step metadata; exchange bodies are available
+		// through the separately paged history records, bounded by PreviewRun.
+		for i := range report.Steps {
+			step := &report.Steps[i]
+			step.ID = clip(step.ID, 128)
+			step.Reason = clip(step.Reason, 512)
+			if step.Error != nil {
+				e := *step.Error
+				e.Message = clip(e.Message, 512)
+				step.Error = &e
+			}
+			step.Exchange.Headers = nil
+			step.Exchange = PreviewRun(Run{Response: step.Exchange}, 0).Response
+		}
+		r.Scenario = &report
 	}
 	r.Environment = clip(r.Environment, 512)
 	r.Error = clip(r.Error, 512)
@@ -272,6 +308,7 @@ func PreviewRun(r Run, bodyBytes int) Run {
 			headers[clip(k, 128)] = out
 		}
 		x.Headers = headers
+		x.Checks = append([]CheckResult(nil), x.Checks...)
 		if len(x.Checks) > 50 {
 			x.Checks = x.Checks[:50]
 		}

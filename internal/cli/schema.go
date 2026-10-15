@@ -25,7 +25,7 @@ type RefreshApplyInput struct {
 	Token string `json:"previewToken" yaml:"previewToken"`
 }
 
-var schemaNames = []string{"spec.refresh-apply", "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete", "comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
+var schemaNames = []string{"environment.delete", "variables.create", "variables.update", "variables.delete", "spec.refresh-apply", "endpoint.create", "endpoint.update", "endpoint.delete", "schema.create", "schema.update", "schema.delete", "comparison.ignore", "history.settings", "project.init", "project.update", "environment.create", "environment.update", "request.send", "case.create", "case.update", "case.duplicate", "case.delete", "case.run", "scenario.create", "scenario.update", "scenario.delete", "scenario.run"}
 
 func schema(name string) (map[string]any, error) {
 	str := map[string]any{"type": "string", "minLength": 1, "pattern": `\S`}
@@ -86,7 +86,7 @@ func schema(name string) (map[string]any, error) {
 			props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
 			required = append(required, "revision")
 		}
-	case "scenario.delete":
+	case "scenario.delete", "environment.delete", "variables.delete":
 		props = map[string]any{"revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}
 		required = []string{"revision"}
 	case "scenario.run":
@@ -107,6 +107,9 @@ func schema(name string) (map[string]any, error) {
 	case "case.run":
 		props = map[string]any{"variables": map[string]any{"type": "object", "additionalProperties": map[string]any{"type": "string"}}}
 		required = []string{}
+	case "variables.create", "variables.update":
+		props = map[string]any{"name": str, "value": map[string]any{"type": "string"}, "revision": map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}}
+		required = []string{"name", "value", "revision"}
 	case "project.init":
 	case "project.update":
 		props["revision"] = map[string]any{"type": "string", "pattern": "^[a-f0-9]{64}$"}
@@ -237,7 +240,7 @@ func validateInput(name string, b []byte) (any, error) {
 			return nil, err
 		}
 		return v, validName(v.Name)
-	case "case.delete":
+	case "case.delete", "environment.delete", "variables.delete":
 		var v CaseDeleteInput
 		if err := project.Decode(b, &v); err != nil {
 			return nil, err
@@ -248,6 +251,12 @@ func validateInput(name string, b []byte) (any, error) {
 		return v, nil
 	case "case.run":
 		var v CaseRunInput
+		if err := project.Decode(b, &v); err != nil {
+			return nil, err
+		}
+		return v, nil
+	case "variables.create", "variables.update":
+		var v VariableInput
 		if err := project.Decode(b, &v); err != nil {
 			return nil, err
 		}

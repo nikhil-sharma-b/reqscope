@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -376,5 +377,53 @@ func TestScenarioRedirectConfirmationFailureEndsContinuedRun(t *testing.T) {
 	}})
 	if err == nil || report.Successful || confirmations != 2 || calls != 1 || report.Steps[1].Outcome != "skipped" {
 		t.Fatalf("%+v %v confirmations=%d calls=%d", report, err, confirmations, calls)
+	}
+}
+
+func TestFailedScenarioHistoryCanBeReopenedPinnedAndBounded(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) }))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	c := scenarioCase(t, root, "/")
+	steps := []project.ScenarioStep{{ID: "producer", CaseID: c.ID, Extracts: map[string]string{"missing": "/missing"}}}
+	for i := 0; i < 55; i++ {
+		steps = append(steps, project.ScenarioStep{ID: fmt.Sprintf("step-%d", i), CaseID: c.ID})
+	}
+	scenario := scenarioSave(t, root, steps, false)
+	report, err := project.RunScenario(context.Background(), root, "staging", scenario.ID, project.ScenarioOptions{})
+	if err == nil || report.Successful || report.Steps[1].Outcome != "skipped" {
+		t.Fatal(report, err)
+	}
+	stored, err := project.GetRun(root, report.RunID)
+	if err != nil || stored.Scenario == nil || stored.Outcome != "failed" || len(stored.Scenario.Steps) != 56 {
+		t.Fatal(stored, err)
+	}
+	skipped, err := project.GetRun(root, report.Steps[1].Exchange.RunID)
+	if err != nil || skipped.Outcome != "skipped" || skipped.ScenarioRunID != report.RunID || skipped.Response.Transport != "not-started" {
+		t.Fatal("skip evidence missing", skipped, err)
+	}
+	preview := project.PreviewRun(stored, 4096)
+	if len(preview.Scenario.Steps) != 50 || !preview.Scenario.StepsTruncated || preview.Scenario.TotalSteps != 56 || preview.Scenario.Steps[0].Exchange.Body != "" {
+		t.Fatal(preview)
+	}
+	if len(stored.Scenario.Steps) != 56 || stored.Scenario.StepsTruncated {
+		t.Fatal("preview mutated stored report")
+	}
+	if err := project.ChangeRun(root, report.RunID, "associate", c.ID); err == nil {
+		t.Fatal("aggregate associated with case")
+	}
+	if err := project.ChangeRun(root, report.RunID, "pin", ""); err != nil {
+		t.Fatal(err)
+	}
+	if err := project.SetHistoryLimits(root, project.HistoryLimits{PerCase: 0, MaxBytes: 0}); err != nil {
+		t.Fatal(err)
+	}
+	stored, err = project.GetRun(root, report.RunID)
+	if err != nil || !stored.Pinned || stored.Scenario == nil {
+		t.Fatal("pinned report evicted", err)
+	}
+	page, err := project.History(root, "", 1, 0)
+	if err != nil || page.Total != 1 || !page.PinnedOverLimit || page.Items[0].Scenario != nil || page.Items[0].ScenarioID != scenario.ID {
+		t.Fatal(page, err)
 	}
 }
