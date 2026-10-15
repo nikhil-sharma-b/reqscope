@@ -24,6 +24,7 @@ type FormField struct {
 }
 
 type RequestDraft struct {
+	Disconnected bool              `json:"disconnected,omitempty" yaml:"disconnected,omitempty"`
 	Form         []FormField       `json:"form,omitempty" yaml:"form,omitempty"`
 	BodyFile     string            `json:"bodyFile,omitempty" yaml:"bodyFile,omitempty"`
 	Variables    map[string]string `json:"variables,omitempty" yaml:"variables,omitempty"`
@@ -167,6 +168,9 @@ func prepareRequest(root, env string, d RequestDraft, interactive bool) (Prepare
 }
 func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, endpoint *Endpoint, snapshot bool, credentials ...*Credentials) (PreparedRequest, error) {
 	var p PreparedRequest
+	if d.Disconnected {
+		return p, Fail("invalid_input", "operation removed by refresh; explicitly relink endpointId and clear disconnected, or convert to an independent request")
+	}
 	if !interactive && strings.TrimSpace(env) == "" {
 		return p, Fail("access_denied", "every CLI network run requires explicit --env")
 	}
@@ -204,7 +208,7 @@ func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, 
 			}
 		}
 		if endpoint == nil {
-			return p, Fail("not_found", "endpoint not found")
+			return p, Fail("not_found", "endpoint disconnected or removed; explicitly relink endpointId or clear it and supply module, method and url for an independent request")
 		}
 		d.Module = endpoint.ModuleID
 		d.Method = endpoint.Method

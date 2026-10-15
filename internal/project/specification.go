@@ -17,6 +17,7 @@ import (
 
 // Specification retains the original bytes and normalized import base for refresh.
 type Specification struct {
+	EmbeddedName     string            `json:"embeddedName,omitempty" yaml:"embeddedName,omitempty"`
 	LocalDocuments   map[string][]byte `json:"localDocuments,omitempty" yaml:"localDocuments,omitempty"`
 	DeletedEndpoints []Endpoint        `json:"deletedEndpoints,omitempty" yaml:"deletedEndpoints,omitempty"`
 	ID               string            `json:"id" yaml:"id"`
@@ -52,6 +53,7 @@ type Schema struct {
 	Definition any    `json:"definition" yaml:"definition"`
 }
 type resolver struct {
+	embeddedName string
 	retainedOnly bool
 	root         string
 	documents    map[string][]byte
@@ -303,7 +305,7 @@ func importResolvedSpecification(root, abs, mode string, r *resolver, v any, pre
 	if err := validateContractFields(base, "contract"); err != nil {
 		return s, err
 	}
-	s = Specification{ID: uuid.NewString(), ModuleID: uuid.NewString(), Mode: mode, Location: abs, Version: version, Documents: r.documents, Base: base, Endpoints: []Endpoint{}, Schemas: []Schema{}, Diagnostics: []string{}, Complete: false}
+	s = Specification{EmbeddedName: r.embeddedName, ID: uuid.NewString(), ModuleID: uuid.NewString(), Mode: mode, Location: abs, Version: version, Documents: r.documents, Base: base, Endpoints: []Endpoint{}, Schemas: []Schema{}, Diagnostics: []string{}, Complete: false}
 	// Import inspection does not perform response validation.
 	s.Diagnostics = append(s.Diagnostics, "Contract inspection only; response schema validation is not implemented")
 	context := map[string]any{}
