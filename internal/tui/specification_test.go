@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 	"os"
@@ -56,7 +57,7 @@ func TestImportPreviewAndInspection(t *testing.T) {
 					t.Fatal("preview wrote")
 				}
 				enter(m)
-				if !strings.Contains(m.View().Content, "GET /pets") {
+				if !strings.Contains(ansi.Strip(m.View().Content), "/pets") {
 					t.Fatal(m.View().Content)
 				}
 				enter(m)

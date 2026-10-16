@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 	"os"
@@ -28,7 +29,7 @@ func TestFocusedEndpointFuzzySearchAndNarrowSelection(t *testing.T) {
 	key(m, "/")
 	key(m, "p")
 	key(m, "t")
-	if !strings.Contains(m.View().Content, "GET /pets") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "/pets") {
 		t.Fatal(m.View().Content)
 	}
 	enter(m)
@@ -49,13 +50,13 @@ func TestFocusedEndpointFuzzySearchAndNarrowSelection(t *testing.T) {
 	key(m, "space")
 	key(m, "s")
 	key(m, "m")
-	if strings.Contains(m.View().Content, "POST /pets") {
+	if strings.Contains(ansi.Strip(m.View().Content), "POST") {
 		t.Fatal("method filter failed", m.View().Content)
 	}
 	key(m, "space")
 	key(m, "s")
 	key(m, "t")
-	if strings.Count(m.View().Content, "GET /pets") != 1 {
+	if strings.Count(ansi.Strip(m.View().Content), "/pets ") != 1 {
 		t.Fatal("duplicate tag result", m.View().Content)
 	}
 	if !strings.Contains(m.View().Content, "api.yaml") {

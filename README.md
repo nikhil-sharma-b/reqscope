@@ -156,6 +156,21 @@ The project pane supports editing and saving the project name. Environment templ
 
 Pending prefixes display a floating continuation menu; Esc cancels them. Help and the palette use the effective action registry, including remappings and unbound actions. Help scrolls with `j`/`k`. Narrow terminals show the focused pane. Resizing preserves focus, pending keys, selection and draft buffers. Clean project resources reload once per second; a changed project revision retains a dirty name and reports a conflict.
 
+The workspace follows the design language of
+[jira-tui](https://github.com/nikhil-sharma-b/jira-tui): panes fill the screen
+in rounded frames with their name and focus key set into the top edge, and only
+the focused frame is drawn in the accent colour. Colours adapt to light and dark
+terminals and are named for what they mark: paths and JSON keys share the
+identity colour, methods and response statuses are coloured by kind, and
+metadata stays quiet. Endpoints are a table with a bold header, row numbers and
+a solid selection band; columns that do not fit are dropped from the right, and
+the selected endpoint's source then appears beneath it. Wide terminals show
+endpoints beside stacked request and response panes; compact terminals and zoom
+show only the focused pane. Below the panes sit the active destination and one
+status line with the mode, workspace, feedback and pending keys; pending
+prefixes open a continuation menu in the bottom-right corner. Request JSON is
+pretty-printed for display without modifying the draft.
+
 Key configuration is read from the OS config directory's `reqscope/keys.yaml`, or `--keys FILE` on `tui`. On Linux the usual path is `$XDG_CONFIG_HOME/reqscope/keys.yaml` or `~/.config/reqscope/keys.yaml`; on macOS it is `~/Library/Application Support/reqscope/keys.yaml`.
 
 ```yaml
@@ -771,13 +786,9 @@ and retain the last valid view. Unsaved project-name edits survive contract refr
 ## Installation and release acceptance
 
 Build from a checkout with Go 1.26 or newer and a C toolchain for race-enabled
-tests. Run `make build`, then install the native binary into a directory on PATH:
-
-```sh
-install -m 755 bin/reqscope "$HOME/.local/bin/reqscope"
-```
-
-Create that directory first if needed. Build on the target OS for a native
+tests. Run `make install` to build and install the native binary into
+`~/.local/bin`, which must be on PATH. Set `PREFIX` to install elsewhere, for
+example `make install PREFIX=/usr/local`. Build on the target OS for a native
 Linux or macOS binary. `make check` builds and vets every package; `make test`
 runs the full suite with the race detector. The
 [acceptance workflow](.github/workflows/acceptance.yml) runs those checks on

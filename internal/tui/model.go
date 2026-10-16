@@ -177,7 +177,10 @@ func Run(root, keys string, in io.Reader, out io.Writer) error {
 	if err != nil {
 		return err
 	}
-	_, err = tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out)).Run()
+	p := tea.NewProgram(m, tea.WithInput(in), tea.WithOutput(out))
+	// The terminal's background picks the palette's light or dark variant.
+	go p.Send(tea.RequestBackgroundColor())
+	_, err = p.Run()
 	return err
 }
 
@@ -193,9 +196,13 @@ func (m *Model) poll() tea.Cmd {
 	root := m.root
 	return tea.Tick(time.Second, func(time.Time) tea.Msg { s, err := project.Load(root); return refreshMsg{s, err} })
 }
+
 func (m *Model) Init() tea.Cmd { return m.poll() }
 func (m *Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.BackgroundColorMsg:
+		applyTheme(msg.IsDark())
+		return m, nil
 	case scenarioPromptMsg:
 		m.prepared = msg.request
 		m.overlay = "scenario-confirm"
@@ -891,6 +898,17 @@ func fit(s string, width, height int) string {
 	return strings.Join(lines, "\n")
 }
 func (m *Model) paneView(pane paneID, width, height int) string {
+	// Each pane renders its own data, not the focused pane's query and cursor.
+	focused := pane == m.pane
+	if !focused {
+		copy := *m
+		copy.pane, copy.index, copy.query = pane, 0, ""
+		m = &copy
+	}
+	outerWidth, outerHeight := width, height
+	if width >= 4 && height >= 3 {
+		width, height = width-2, height-2
+	}
 	title := panes[pane]
 	if pane == endpointsPane {
 		if m.methodFilter != "" {
@@ -899,9 +917,6 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		if m.groupTags {
 			title += " by tag"
 		}
-	}
-	if pane == m.pane {
-		title = "> " + title
 	}
 	var body string
 	switch pane {
@@ -935,23 +950,29 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		body += "\nCLI access requires TUI approval"
 	case endpointsPane, schemasPane:
 		labels, _ := m.contractItems()
-		if len(labels) == 0 {
-			body = "No matching imported resources"
+		for i := range labels {
+			labels[i] = m.credentials.Sanitize(labels[i])
 		}
-		start := min(m.index, max(0, len(labels)-1))
+		if len(labels) == 0 {
+			body = "No matching imported resources\n\nImport an OpenAPI file or Swagger URL"
+			if hint := m.keyHint("import"); hint != "" {
+				body += "\n" + keyLine(hint, "import specification")
+			}
+		}
+		if pane == endpointsPane && len(labels) > 0 {
+			body = endpointTable(labels, m.index, width, height, focused)
+			break
+		}
+		start := max(0, m.index-max(1, height-1)+1)
 		for i := start; i < len(labels); i++ {
 			mark := "  "
 			if i == m.index {
 				mark = "> "
 			}
-			if i == m.index && pane == endpointsPane {
-				body += ansi.Wrap(mark+labels[i], max(1, width), "") + "\n"
-			} else {
-				body += mark + labels[i] + "\n"
-			}
+			body += mark + labels[i] + "\n"
 		}
 	case requestPane:
-		body = m.requestText
+		body = prettyDraft(m.requestText)
 		if m.overlay == "request-confirm" {
 			body = "Review the sanitized destination in the confirmation"
 		}
@@ -966,19 +987,35 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 			body = label + "\n" + body
 		}
 		if body == "" {
-			body = "No request selected | request new or compose"
+			body = "No request selected\n\nSelect an endpoint to compose a request"
+			if hint := m.keyHint("request-compose"); hint != "" {
+				body += "\n" + keyLine(hint, "compose from contract")
+			}
+			if hint := m.keyHint("request-new"); hint != "" {
+				body += "\n" + keyLine(hint, "new request")
+			}
 		}
 	case responsePane:
 		lines := m.responseLines()
 		start := min(m.index, max(0, len(lines)-1))
 		body = strings.Join(lines[start:], "\n")
+		if m.exchange.Status == 0 && m.exchange.RunID == "" {
+			body += "\n\nSend a request to inspect the response"
+			if hint := m.keyHint("request-send"); hint != "" {
+				body += "\n" + keyLine(hint, "send request")
+			}
+		}
 	case historyPane:
-		body = strings.Join(m.historyLines(), "\n")
+		lines := m.historyLines()
+		start := max(0, m.index-max(1, height-1)+1)
+		body = strings.Join(lines[min(start, len(lines)):], "\n")
 	case casesPane:
 		body = "No cases saved"
 		if items := m.caseItems(); len(items) > 0 {
 			body = ""
-			for i, c := range items {
+			start := max(0, m.index-max(1, height-1)+1)
+			for i := start; i < len(items); i++ {
+				c := items[i]
 				mark := "  "
 				if i == m.index {
 					mark = "> "
@@ -990,7 +1027,9 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 		body = "No scenarios saved"
 		if items := m.scenarioItems(); len(items) > 0 {
 			body = ""
-			for i, s := range items {
+			start := max(0, m.index-max(1, height-1)+1)
+			for i := start; i < len(items); i++ {
+				s := items[i]
 				mark := "  "
 				if i == m.index {
 					mark = "> "
@@ -999,50 +1038,37 @@ func (m *Model) paneView(pane paneID, width, height int) string {
 			}
 		}
 	}
-	return fit(m.credentials.Sanitize(title+"\n"+body), max(1, width), max(1, height))
+	body = styledBody(m.credentials.Sanitize(body), width, focused)
+	return panel(body, title, m.paneHint(pane), outerWidth, outerHeight, focused)
 }
 func (m *Model) View() tea.View {
 	if err := m.credentials.Refresh(m.root); err != nil {
 		return m.credentialRecoveryView()
 	}
-	width, height := m.width, m.height
-	dirty := ""
-	if m.dirty || m.requestDirty() {
-		dirty = " *unsaved"
-	}
-	header := fmt.Sprintf("Reqscope | %s%s | %s | %s", m.draft, dirty, m.mode, panes[m.pane])
-	active := ansi.Wrap(m.credentials.Sanitize(m.activeDestination()), max(1, width), "")
-	activeHeight := len(strings.Split(active, "\n"))
-	contentHeight := max(1, height-3-activeHeight)
+	width, height := max(1, m.width), max(1, m.height)
+	// Like jira-tui, panes own the screen: no banner, just the destination a
+	// request would reach and one status line beneath them.
+	destination := destinationLine(m.credentials.Sanitize(m.activeDestination()), width)
+	contentHeight := max(1, height-1-len(strings.Split(destination, "\n")))
 	var content string
-	if width < 90 || m.zoom {
+	if width < 90 || height < 16 || m.zoom {
 		content = m.paneView(m.pane, width, contentHeight)
 	} else {
-		left := width / 3
-		right := width - left - 3
+		left := width * 45 / 100
+		right := width - left
 		other := requestPane
 		if m.pane != endpointsPane {
 			other = m.pane
 		}
 		rightView := m.paneView(other, right, contentHeight)
-		if m.pane == endpointsPane || m.pane == requestPane || m.pane == responsePane {
-			top := max(1, contentHeight/2)
+		if other == requestPane || other == responsePane {
+			top := contentHeight / 2
 			bottom := max(1, contentHeight-top)
 			rightView = m.paneView(requestPane, right, top) + "\n" + m.paneView(responsePane, right, bottom)
 		}
-		content = lipgloss.JoinHorizontal(lipgloss.Top, m.paneView(endpointsPane, left, contentHeight), " | ", rightView)
+		content = lipgloss.JoinHorizontal(lipgloss.Top, m.paneView(endpointsPane, left, contentHeight), rightView)
 	}
-	footer := m.status
-	if m.mode == "SEARCH" {
-		footer = "/" + m.query
-		if m.globalSearch {
-			footer = "Endpoints /" + m.endpointQuery
-		}
-	}
-	if m.pending != "" {
-		footer = m.pending
-	}
-	base := fit(m.credentials.Sanitize(header+"\n"+active+"\n"+content+"\n"+footer+"\n? help | normal/insert | pane switches"), width, height)
+	base := fit(content+"\n"+destination+"\n"+m.statusLine(width), width, height)
 	overlay := m.environmentOverlay()
 	if m.overlay == "comparison-input" {
 		overlay = "Compare run IDs | Enter compare | Esc cancel\n" + m.comparisonText + "\n" + m.status
@@ -1114,9 +1140,6 @@ func (m *Model) View() tea.View {
 	case "confirm-quit":
 		overlay = "Unsaved project name\ns save | d discard | c cancel"
 	}
-	if m.pending != "" {
-		overlay = m.pending + "\n" + continuations(m.bindings, m.pending) + "\nEsc cancel"
-	}
 	if overlay != "" {
 		overlay = m.credentials.Sanitize(overlay)
 		ow := max(1, min(width, 64))
@@ -1125,9 +1148,15 @@ func (m *Model) View() tea.View {
 			overlay = ansi.Wrap(overlay, max(1, ow-4), "")
 		}
 		oh := max(1, min(height, len(strings.Split(overlay, "\n"))+2))
-		style := lipgloss.NewStyle().Border(lipgloss.RoundedBorder()).Width(max(1, ow-2))
-		box := fit(style.Render(fit(overlay, max(1, ow-2), max(1, oh-2))), ow, oh)
+		lines := strings.Split(overlay, "\n")
+		body := styledBody(strings.Join(lines[1:], "\n"), max(1, ow-2), true)
+		box := panel(body, lines[0], "", ow, oh, true)
 		base = lipgloss.NewCompositor(lipgloss.NewLayer(base), lipgloss.NewLayer(box).X(max(0, (width-ow)/2)).Y(max(0, (height-oh)/2)).Z(1)).Render()
+	}
+	// The continuation menu floats one row clear of the panes' bottom edge.
+	if box := m.whichKey(width, contentHeight); box != "" {
+		bw, bh := ansi.StringWidth(strings.SplitN(box, "\n", 2)[0]), len(strings.Split(box, "\n"))
+		base = lipgloss.NewCompositor(lipgloss.NewLayer(base), lipgloss.NewLayer(box).X(max(0, width-bw-2)).Y(max(0, contentHeight-bh-1)).Z(2)).Render()
 	}
 	v := tea.NewView(base)
 	v.AltScreen = true
