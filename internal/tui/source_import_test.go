@@ -3,6 +3,7 @@ package tui_test
 import (
 	tea "charm.land/bubbletea/v2"
 	"fmt"
+	"github.com/charmbracelet/x/ansi"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -57,7 +58,7 @@ func TestTUISourceApprovalSelectionAndCancellation(t *testing.T) {
 		t.Fatal("preview wrote")
 	}
 	enter(m)
-	if !strings.Contains(m.View().Content, "GET /second") {
+	if !strings.Contains(ansi.Strip(m.View().Content), "/second") {
 		t.Fatal(m.View().Content)
 	}
 	if specs, _ := project.Specifications(root); len(specs) != 1 {

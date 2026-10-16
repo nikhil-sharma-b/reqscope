@@ -28,7 +28,7 @@ func TestModesPrefixesAndResize(t *testing.T) {
 		t.Fatal(err)
 	}
 	key(m, "space")
-	if !strings.Contains(m.View().Content, "More commands") {
+	if !strings.Contains(m.View().Content, "+more keys") {
 		t.Fatal("missing continuation menu")
 	}
 	key(m, "esc")

@@ -2,6 +2,7 @@ package tui_test
 
 import (
 	tea "charm.land/bubbletea/v2"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 	"strings"
@@ -19,7 +20,7 @@ func TestCountsLeaderHelpAndPalette(t *testing.T) {
 		key(m, k)
 	}
 	view := m.View().Content
-	if !strings.Contains(view, "> staging") {
+	if !strings.Contains(view, "▸ staging") {
 		t.Fatalf("count motion did not select last environment: %s", view)
 	}
 	key(m, "H")
@@ -75,7 +76,7 @@ func TestFocusedProjectSearchAndLeaderGroups(t *testing.T) {
 		key(m, k)
 	}
 	view := m.View().Content
-	if !strings.Contains(view, "> Name: Demo") || strings.Contains(view, "ID:") {
+	if !strings.Contains(view, "▸ Name: Demo") || strings.Contains(view, "ID:") {
 		t.Fatalf("project search did not filter rows: %s", view)
 	}
 	key(m, "esc")
@@ -87,7 +88,7 @@ func TestFocusedProjectSearchAndLeaderGroups(t *testing.T) {
 	key(m, "esc")
 	for _, group := range []string{"r", "e", "c", "s", "h", "p"} {
 		key(m, "space")
-		if !strings.Contains(m.View().Content, group+"  More commands") {
+		if !strings.Contains(ansi.Strip(m.View().Content), group+" → +more keys") {
 			t.Fatalf("missing leader group %s", group)
 		}
 		key(m, "esc")
@@ -95,7 +96,8 @@ func TestFocusedProjectSearchAndLeaderGroups(t *testing.T) {
 	for _, k := range []string{"space", "/"} {
 		key(m, k)
 	}
-	if !strings.Contains(m.View().Content, "> Endpoints") {
+	m.Update(tea.WindowSizeMsg{Width: 60, Height: 20})
+	if !strings.Contains(ansi.Strip(m.View().Content), "╭─ Endpoints") {
 		t.Fatal("leader search did not focus endpoints")
 	}
 }

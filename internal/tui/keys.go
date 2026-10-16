@@ -178,18 +178,25 @@ func help(bindings []Binding) string {
 	}
 	return strings.Join(lines, "\n")
 }
-func continuations(bindings []Binding, prefix string) string {
-	next := map[string]string{}
+
+// continuation is one key that can follow a pending prefix. A group leads
+// to further keys rather than to an action.
+type continuation struct {
+	key, label string
+	group      bool
+}
+
+func continuations(bindings []Binding, prefix string) []continuation {
+	next := map[string]continuation{}
 	for _, b := range bindings {
 		for _, seq := range b.Keys {
 			if strings.HasPrefix(seq, prefix+" ") {
-				rest := strings.TrimPrefix(seq, prefix+" ")
-				parts := strings.Fields(rest)
-				label := b.Description
+				parts := strings.Fields(strings.TrimPrefix(seq, prefix+" "))
 				if len(parts) > 1 {
-					label = "More commands"
+					next[parts[0]] = continuation{key: parts[0], label: "+more keys", group: true}
+				} else if _, ok := next[parts[0]]; !ok {
+					next[parts[0]] = continuation{key: parts[0], label: b.Description}
 				}
-				next[parts[0]] = label
 			}
 		}
 	}
@@ -198,9 +205,9 @@ func continuations(bindings []Binding, prefix string) string {
 		keys = append(keys, key)
 	}
 	sort.Strings(keys)
-	var lines []string
+	result := make([]continuation, 0, len(keys))
 	for _, key := range keys {
-		lines = append(lines, key+"  "+next[key])
+		result = append(result, next[key])
 	}
-	return strings.Join(lines, "\n")
+	return result
 }

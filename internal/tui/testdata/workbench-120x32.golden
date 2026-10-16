@@ -1,0 +1,32 @@
+╭─ Endpoints ─────────────────────────────────── g e ╮╭─ Request ───────────────────────────────────────────────── g q ╮
+│  # METHOD PATH          SUMMARY        SOURCE      ││Draft                                                           │
+│▸ 1 GET    /pets         List all pets  openapi.yaml││{                                                               │
+│  2 POST   /pets         Add a pet to … openapi.yaml││  "method": "GET",                                              │
+│  3 GET    /pets/{petId} Find a pet by… openapi.yaml││  "url": "/pets",                                               │
+│                                                    ││  "headers": {                                                  │
+│                                                    ││    "Accept": "application/json"                                │
+│                                                    ││  }                                                             │
+│                                                    ││}                                                               │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    │╰────────────────────────────────────────────────────────────────╯
+│                                                    │╭─ Response ──────────────────────────────────────────────── g r ╮
+│                                                    ││No response recorded                                            │
+│                                                    ││                                                                │
+│                                                    ││Send a request to inspect the response                          │
+│                                                    ││space r s → send request                                        │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+│                                                    ││                                                                │
+╰────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────────────╯
+Env: choose
+NORMAL  Petstore API  1/3                                                                                         ? help

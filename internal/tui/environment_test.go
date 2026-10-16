@@ -3,6 +3,7 @@ package tui_test
 import (
 	tea "charm.land/bubbletea/v2"
 	"encoding/json"
+	"github.com/charmbracelet/x/ansi"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 	"strings"
@@ -76,7 +77,7 @@ func TestActiveDestinationWrapsAtNarrowWidths(t *testing.T) {
 	}
 	for _, width := range []int{80, 32} {
 		m.Update(tea.WindowSizeMsg{Width: width, Height: 24})
-		view := strings.ReplaceAll(m.View().Content, "\n", "")
+		view := strings.ReplaceAll(ansi.Strip(m.View().Content), "\n", "")
 		for _, text := range []string{"Env: staging", "nonproduction", "https://staging.example.com/v1"} {
 			if !strings.Contains(view, text) {
 				t.Fatalf("width %d missing %s: %s", width, text, m.View().Content)

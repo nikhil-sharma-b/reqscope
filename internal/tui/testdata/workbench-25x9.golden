@@ -1,0 +1,9 @@
+╭─ Endpoints ────── g e ╮
+│  # METHOD PATH        │
+│▸ 1 GET    /pets       │
+│    openapi.yaml       │
+│  2 POST   /pets       │
+│  3 GET    /pets/{petI…│
+╰───────────────────────╯
+Env: choose
+NORMAL  Petstore … ? help
