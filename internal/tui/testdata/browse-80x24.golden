@@ -1,8 +1,9 @@
-╭─ Endpoints ───────────────────────────────────────────────────────────── g e ╮
-│  # METHOD PATH          SUMMARY                                  SOURCE      │
-│▸ 1 GET    /pets         List all pets                            openapi.yaml│
-│  2 POST   /pets         Add a pet to the store                   openapi.yaml│
-│  3 GET    /pets/{petId} Find a pet by ID                         openapi.yaml│
+  1 Endpoints   2 Saved  3 Scenarios  4 History  5 Environments        ● staging
+╭─ Endpoints ───────────────────────────────────────────────── 1/3  Details l ─╮
+│  3 endpoints                                                                 │
+│ ▌GET     /pets          List all pets                                        │
+│  POST    /pets          Add a pet to the store                               │
+│  PUT     /pets/{petId}  Find a pet by ID                                     │
 │                                                                              │
 │                                                                              │
 │                                                                              │
@@ -20,5 +21,4 @@
 │                                                                              │
 │                                                                              │
 ╰──────────────────────────────────────────────────────────────────────────────╯
-Env: choose
-NORMAL  Petstore API  1/3                                                 ? help
+ enter open   / filter   i import   v contract   n new   space menu   ? keys    

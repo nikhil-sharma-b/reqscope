@@ -1,0 +1,32 @@
+ Petstore    1 Endpoints   2 Saved  3 Scenarios  4 History  5 Environments                                     ● staging
+ ‹ Endpoints  PUT /pets/{petId}                                                                                         
+╭─ Request ──────────────────────────────────────────────────╮╭─ Response ───────────────────────────────────────── l ─╮
+│ ▌PUT     /pets/{petId}                                     ││                                                        │
+│   https://staging.petstore.dev/v2/pets/{petId}             ││ Nothing sent yet.                                      │
+│                                                            ││                                                        │
+│ Path ───────────────────────────────────────────────────── ││ s send this request                                    │
+│   petId   required                                         ││                                                        │
+│                                                            ││                                                        │
+│ Query ──────────────────────────────────────────────────── ││                                                        │
+│   limit   e.g. 20                                          ││                                                        │
+│   + add                                                    ││                                                        │
+│                                                            ││                                                        │
+│ Headers ────────────────────────────────────────────────── ││                                                        │
+│   + add                                                    ││                                                        │
+│                                                            ││                                                        │
+│ Body ───────────────────────────────────────────────────── ││                                                        │
+│   raw  empty                                               ││                                                        │
+│                                                            ││                                                        │
+│ Variables ──────────────────────────────────────────────── ││                                                        │
+│   + add                                                    ││                                                        │
+│                                                            ││                                                        │
+│                                                            ││      ╭─ space r ───────────────────────── esc close ─╮ │
+│                                                            ││      │ s → send                t → body type         │ │
+│                                                            ││      │ w → save                a → attach file       │ │
+│                                                            ││      │ W → save as new         m → method            │ │
+│                                                            ││      │ n → new blank request   x → clear             │ │
+│                                                            ││      │ j → edit as JSON        k → cancel running    │ │
+│                                                            ││      │ b → edit body                                 │ │
+│                                                            ││      ╰───────────────────────────────────────────────╯ │
+╰────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯
+ space r …   esc close   backspace up                                                                                   

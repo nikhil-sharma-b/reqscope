@@ -92,6 +92,12 @@ func (c *Credentials) value(item localCredential) (string, error) {
 	if err != nil || v == "" {
 		return "", Fail("access_denied", "credential is missing or OS credential service is unavailable; replace it in the TUI")
 	}
+	c.rememberValue(item, v)
+	return v, nil
+}
+
+// rememberValue registers every form a credential value can take in output.
+func (c *Credentials) rememberValue(item localCredential, v string) {
 	c.remember(v)
 	if item.Kind == "basic" {
 		c.remember(base64.StdEncoding.EncodeToString([]byte(v)))
@@ -99,7 +105,6 @@ func (c *Credentials) value(item localCredential) (string, error) {
 			c.remember(password)
 		}
 	}
-	return v, nil
 }
 
 // Save is called only by interactive credential entry, never by the CLI.
@@ -494,17 +499,35 @@ func (c *Credentials) Refresh(root string) error {
 	if err != nil {
 		return err
 	}
+	// OS store lookups can take a process launch each, so they run without the
+	// registry lock: an adapter refreshing in the background must not stall
+	// Sanitize on the thread that draws the screen.
+	var stored []localCredential
 	c.mu.Lock()
-	defer c.mu.Unlock()
 	for _, items := range a.Credentials {
 		for _, item := range items {
-			if item.Session && c.session[item.Key] == "" {
+			if !item.Session {
+				stored = append(stored, item)
+				continue
+			}
+			if c.session[item.Key] == "" {
 				continue
 			}
 			if _, err := c.value(item); err != nil {
+				c.mu.Unlock()
 				return err
 			}
 		}
+	}
+	c.mu.Unlock()
+	for _, item := range stored {
+		v, err := c.store.Get(item.Key)
+		if err != nil || v == "" {
+			return Fail("access_denied", "credential is missing or OS credential service is unavailable; replace it in the TUI")
+		}
+		c.mu.Lock()
+		c.rememberValue(item, v)
+		c.mu.Unlock()
 	}
 	return nil
 }
