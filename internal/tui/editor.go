@@ -1,7 +1,6 @@
 package tui
 
 import (
-	"encoding/json"
 	"errors"
 	"io"
 	"os"
@@ -10,14 +9,11 @@ import (
 	"strings"
 
 	tea "charm.land/bubbletea/v2"
-	"github.com/nikhil-sharma-b/reqscope/internal/project"
 )
 
 type editorFinishedMsg struct {
-	previous string
-	draft    project.RequestDraft
-	body     string
-	err      error
+	text string
+	err  error
 }
 
 // editorProcess creates scratch content only after Bubble Tea releases the
@@ -25,6 +21,7 @@ type editorFinishedMsg struct {
 type editorProcess struct {
 	command        string
 	body           string
+	ext            string
 	result         string
 	stdin          io.Reader
 	stdout, stderr io.Writer
@@ -39,7 +36,8 @@ func (p *editorProcess) Run() (err error) {
 		return err
 	}
 	defer func() { err = errors.Join(err, os.RemoveAll(dir)) }()
-	path := filepath.Join(dir, "body.txt")
+	// The extension lets the editor pick syntax highlighting.
+	path := filepath.Join(dir, "reqscope."+p.ext)
 	if err = os.WriteFile(path, []byte(p.body), 0600); err != nil {
 		return err
 	}
@@ -58,57 +56,50 @@ func (p *editorProcess) Run() (err error) {
 	return nil
 }
 
-func (m *Model) openExternalEditor() tea.Cmd {
-	if m.requestCancel != nil {
-		m.status = "Cancel the running request first"
-		return nil
+func editorCommand() string {
+	if editor := strings.TrimSpace(os.Getenv("VISUAL")); editor != "" {
+		return editor
 	}
-	var d project.RequestDraft
-	if err := project.Decode([]byte(m.requestText), &d); err != nil {
-		m.status = err.Error()
-		return nil
+	if editor := strings.TrimSpace(os.Getenv("EDITOR")); editor != "" {
+		return editor
 	}
-	if d.BodyFile != "" || d.BodyType != "raw" && d.BodyType != "json" && d.BodyType != "" {
-		m.status = "External editing requires an inline raw or JSON body"
-		return nil
-	}
-	if m.credentials.Sanitize(d.Body) != d.Body {
-		m.status = "Body contains a registered credential; use an unexpanded secret reference before editing"
-		return nil
-	}
-	editor := strings.TrimSpace(os.Getenv("VISUAL"))
-	if editor == "" {
-		editor = strings.TrimSpace(os.Getenv("EDITOR"))
-	}
-	if editor == "" {
-		editor = "vi"
-	}
-	p := &editorProcess{command: editor, body: d.Body}
-	previous := m.requestText
-	m.status = "Editing unexpanded request body"
-	return tea.Exec(p, func(err error) tea.Msg {
-		return editorFinishedMsg{previous: previous, draft: d, body: p.result, err: err}
-	})
+	return "vi"
 }
 
-func (m *Model) finishExternalEditor(msg editorFinishedMsg) {
-	if msg.err != nil {
-		m.status = "Editor cancelled or failed; previous buffer retained"
-		return
+// openEditor hands the terminal to $VISUAL or $EDITOR and calls done with
+// what was saved.
+func (m *Model) openEditor(text, ext string, done func(text string, err error) tea.Cmd) tea.Cmd {
+	p := &editorProcess{command: editorCommand(), body: text, ext: ext}
+	m.editorDone = done
+	return tea.Exec(p, func(err error) tea.Msg { return editorFinishedMsg{text: p.result, err: err} })
+}
+
+// editText edits a document and applies it. When applying fails, the error
+// is shown with a way back into the editor that keeps what was typed.
+func (m *Model) editText(text, ext string, apply func(m *Model, text string) (tea.Cmd, error)) tea.Cmd {
+	var edit func(current string) tea.Cmd
+	edit = func(current string) tea.Cmd {
+		return m.openEditor(current, ext, func(edited string, err error) tea.Cmd {
+			switch {
+			case err != nil:
+				m.say("The editor closed with an error; nothing changed")
+				return nil
+			case edited == text:
+				m.say("No changes")
+				return nil
+			}
+			cmd, err := apply(m, edited)
+			if err != nil {
+				lines := []string{}
+				for _, line := range wrap(sentence(err.Error()), 70) {
+					lines = append(lines, badStyle.Render(line))
+				}
+				lines = append(lines, "", quiet.Render("Your text is kept. Edit it again to fix this, or close to discard it."))
+				m.modal = &viewerModal{title: "Not saved", lines: lines, width: 76,
+					extra: []extraKey{{"e", "edit again", func(m *Model) tea.Cmd { return edit(edited) }}}}
+			}
+			return cmd
+		})
 	}
-	if m.requestText != msg.previous {
-		m.status = "Request changed while editing; current buffer retained"
-		return
-	}
-	if msg.body == msg.draft.Body {
-		m.status = "Editor closed without changes; previous buffer retained"
-		return
-	}
-	msg.draft.Body = msg.body
-	b, _ := json.Marshal(msg.draft)
-	m.requestText = string(b)
-	m.status = "Edited body retained; inputs will be validated before send"
-	if msg.draft.BodyType == "json" && !json.Valid([]byte(msg.body)) {
-		m.status = "Invalid JSON body; edit the body again before sending"
-	}
+	return edit(text)
 }

@@ -46,84 +46,90 @@ func ContractDraft(root, id string) (RequestDraft, []GuidedField, error) {
 	}
 	for _, s := range specs {
 		for _, ep := range s.Endpoints {
-			if ep.ID != id {
-				continue
+			if ep.ID == id {
+				d, fields := EndpointDraft(ep)
+				return d, fields, nil
 			}
-			d := RequestDraft{EndpointID: id, Module: ep.ModuleID, Method: ep.Method, URL: ep.Path, Path: map[string]string{}, BodyType: "raw"}
-			fields := []GuidedField{}
-			for _, p := range contractParameters(ep) {
-				name, _ := p["name"].(string)
-				in, _ := p["in"].(string)
-				required, _ := p["required"].(bool)
-				description, _ := p["description"].(string)
-				example := p["example"]
-				if example == nil {
-					example = object(p["schema"])["example"]
-				}
-				if in == "formData" {
-					in = "form"
-					if p["type"] == "file" || object(p["items"])["type"] == "file" {
-						in = "file"
-					}
-				}
-				fields = append(fields, GuidedField{name, in, required || in == "path", description, example})
-			}
-			rb := object(ep.Operation["requestBody"])
-			if rb != nil {
-				required, _ := rb["required"].(bool)
-				description, _ := rb["description"].(string)
-				content := object(rb["content"])
-				media := keys(content)
-				if len(media) > 0 {
-					d.ContentType = media[0]
-					if _, ok := content["application/json"]; ok {
-						d.ContentType = "application/json"
-						d.BodyType = "json"
-					}
-					if d.ContentType == "application/x-www-form-urlencoded" || d.ContentType == "multipart/form-data" {
-						d.BodyType = "form"
-						if d.ContentType == "multipart/form-data" {
-							d.BodyType = "multipart"
-						}
-						fields = append(fields, guidedFormFields(object(object(content[d.ContentType])["schema"]))...)
-					} else {
-						fields = append(fields, GuidedField{"body", "body", required, description, object(content[d.ContentType])["example"]})
-					}
-				}
-			}
-			if rb == nil {
-				consumes := ep.Operation["consumes"]
-				if consumes == nil {
-					consumes = ep.Context["consumes"]
-				}
-				for _, media := range anyList(consumes) {
-					if media == "multipart/form-data" || media == "application/x-www-form-urlencoded" {
-						d.ContentType = fmt.Sprint(media)
-						d.BodyType = "form"
-						if media == "multipart/form-data" {
-							d.BodyType = "multipart"
-						}
-						break
-					}
-				}
-			}
-			if rb == nil && d.BodyType == "raw" {
-				for _, f := range fields {
-					if f.In == "file" {
-						d.BodyType = "multipart"
-						d.ContentType = "multipart/form-data"
-						break
-					}
-					if f.In == "form" {
-						d.BodyType = "form"
-						d.ContentType = "application/x-www-form-urlencoded"
-					}
-				}
-			}
-			return d, fields, nil
 		}
 	}
 	return RequestDraft{}, nil, Fail("not_found", "endpoint not found")
+}
+
+// EndpointDraft builds the same draft as ContractDraft from an endpoint the
+// caller already holds, so adapters need not re-read every specification.
+func EndpointDraft(ep Endpoint) (RequestDraft, []GuidedField) {
+	d := RequestDraft{EndpointID: ep.ID, Module: ep.ModuleID, Method: ep.Method, URL: ep.Path, Path: map[string]string{}, BodyType: "raw"}
+	fields := []GuidedField{}
+	for _, p := range contractParameters(ep) {
+		name, _ := p["name"].(string)
+		in, _ := p["in"].(string)
+		required, _ := p["required"].(bool)
+		description, _ := p["description"].(string)
+		example := p["example"]
+		if example == nil {
+			example = object(p["schema"])["example"]
+		}
+		if in == "formData" {
+			in = "form"
+			if p["type"] == "file" || object(p["items"])["type"] == "file" {
+				in = "file"
+			}
+		}
+		fields = append(fields, GuidedField{name, in, required || in == "path", description, example})
+	}
+	rb := object(ep.Operation["requestBody"])
+	if rb != nil {
+		required, _ := rb["required"].(bool)
+		description, _ := rb["description"].(string)
+		content := object(rb["content"])
+		media := keys(content)
+		if len(media) > 0 {
+			d.ContentType = media[0]
+			if _, ok := content["application/json"]; ok {
+				d.ContentType = "application/json"
+				d.BodyType = "json"
+			}
+			if d.ContentType == "application/x-www-form-urlencoded" || d.ContentType == "multipart/form-data" {
+				d.BodyType = "form"
+				if d.ContentType == "multipart/form-data" {
+					d.BodyType = "multipart"
+				}
+				fields = append(fields, guidedFormFields(object(object(content[d.ContentType])["schema"]))...)
+			} else {
+				fields = append(fields, GuidedField{"body", "body", required, description, object(content[d.ContentType])["example"]})
+			}
+		}
+	}
+	if rb == nil {
+		consumes := ep.Operation["consumes"]
+		if consumes == nil {
+			consumes = ep.Context["consumes"]
+		}
+		for _, media := range anyList(consumes) {
+			if media == "multipart/form-data" || media == "application/x-www-form-urlencoded" {
+				d.ContentType = fmt.Sprint(media)
+				d.BodyType = "form"
+				if media == "multipart/form-data" {
+					d.BodyType = "multipart"
+				}
+				break
+			}
+		}
+	}
+	if rb == nil && d.BodyType == "raw" {
+		for _, f := range fields {
+			if f.In == "file" {
+				d.BodyType = "multipart"
+				d.ContentType = "multipart/form-data"
+				break
+			}
+			if f.In == "form" {
+				d.BodyType = "form"
+				d.ContentType = "application/x-www-form-urlencoded"
+			}
+		}
+	}
+	return d, fields
 }
 func serializeContract(ep Endpoint, path map[string]string, query url.Values, headers http.Header) error {
 	for _, p := range contractParameters(ep) {

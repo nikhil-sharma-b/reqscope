@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 
 	"github.com/google/uuid"
 	"go.yaml.in/yaml/v3"
@@ -614,4 +615,68 @@ func normalizeYAML(v any) (any, error) {
 	default:
 		return v, nil
 	}
+}
+
+// endpointCache maps the digest of a specification file's bytes to its
+// endpoints. The digest is taken from the bytes just read, so a hit is the
+// same content and can never be stale; a multi-megabyte contract is decoded
+// once per change instead of on every send. Endpoints are shared read-only.
+var endpointCache = struct {
+	sync.Mutex
+	byDigest map[string]map[string]Endpoint
+}{byDigest: map[string]map[string]Endpoint{}}
+
+// lookupEndpoint finds one endpoint by ID without decoding unchanged
+// specifications again.
+func lookupEndpoint(root, id string) (*Endpoint, error) {
+	var found *Endpoint
+	err := locked(root, func() error {
+		snapshot, err := load(root)
+		if err != nil {
+			return err
+		}
+		for _, source := range snapshot.Manifest.Sources {
+			if !validID(source) {
+				return Fail("invalid_input", "invalid source UUID")
+			}
+			path := "specs/" + source + ".yaml"
+			if err := safePath(root, path); err != nil {
+				return err
+			}
+			b, err := os.ReadFile(filepath.Join(root, path))
+			if err != nil {
+				return err
+			}
+			digest := Digest(b)
+			endpointCache.Lock()
+			endpoints, ok := endpointCache.byDigest[digest]
+			endpointCache.Unlock()
+			if !ok {
+				var s Specification
+				if err = Decode(b, &s); err != nil {
+					return err
+				}
+				if err = validateSpecification(s); err != nil {
+					return err
+				}
+				endpoints = make(map[string]Endpoint, len(s.Endpoints))
+				for _, ep := range s.Endpoints {
+					ep.Revision = digest
+					endpoints[ep.ID] = ep
+				}
+				endpointCache.Lock()
+				if len(endpointCache.byDigest) >= 16 {
+					endpointCache.byDigest = map[string]map[string]Endpoint{}
+				}
+				endpointCache.byDigest[digest] = endpoints
+				endpointCache.Unlock()
+			}
+			if ep, ok := endpoints[id]; ok {
+				copy := ep
+				found = &copy
+			}
+		}
+		return nil
+	})
+	return found, err
 }

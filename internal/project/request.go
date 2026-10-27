@@ -196,17 +196,8 @@ func prepareRequestSnapshot(root, env string, d RequestDraft, interactive bool, 
 	}
 	if d.EndpointID != "" {
 		if !snapshot {
-			specs, err := Specifications(root)
-			if err != nil {
+			if endpoint, err = lookupEndpoint(root, d.EndpointID); err != nil {
 				return p, err
-			}
-			for _, spec := range specs {
-				for _, ep := range spec.Endpoints {
-					if ep.ID == d.EndpointID {
-						copy := ep
-						endpoint = &copy
-					}
-				}
 			}
 		}
 		if endpoint == nil {
@@ -457,17 +448,8 @@ func send(ctx context.Context, root, env string, d RequestDraft, opts SendOption
 		return result, err
 	}
 	if !snapshot && d.EndpointID != "" {
-		specs, e := Specifications(root)
-		if e != nil {
-			return result, e
-		}
-		for _, spec := range specs {
-			for _, ep := range spec.Endpoints {
-				if ep.ID == d.EndpointID {
-					copy := ep
-					endpoint = &copy
-				}
-			}
+		if endpoint, err = lookupEndpoint(root, d.EndpointID); err != nil {
+			return result, err
 		}
 	}
 	result.Transport = "not-started"

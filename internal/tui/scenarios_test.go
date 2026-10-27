@@ -2,286 +2,186 @@ package tui_test
 
 import (
 	"bytes"
-	"encoding/json"
+	"context"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 	"sync/atomic"
 	"testing"
 	"time"
 
-	tea "charm.land/bubbletea/v2"
 	"github.com/google/uuid"
 	"github.com/nikhil-sharma-b/reqscope/internal/cli"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 )
 
-func scenarioKeys(m *tui.Model, keys ...string) tea.Cmd {
-	var cmd tea.Cmd
-	for _, k := range keys {
-		_, cmd = m.Update(tea.KeyPressMsg{Text: k, Code: []rune(k)[0]})
-	}
-	return cmd
-}
-func scenarioTUIWorkspace(t *testing.T, url, envName string) (string, project.CaseResource, *tui.Model) {
+func scenarioWorkspace(t *testing.T, url, envName string) (string, project.CaseResource) {
 	t.Helper()
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
-	root := t.TempDir()
-	workspace, err := project.Init(root, "Scenarios", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	env, _ := workspace.Resolve(envName)
-	env.BaseURLs["api"] = url
-	if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
-		t.Fatal(err)
-	}
-	if err := project.SelectEnvironment(root, env.ID); err != nil {
-		t.Fatal(err)
-	}
-	c, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Case", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/?q={{value}}", Variables: map[string]string{"value": "ordinary"}}}, "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m, err := tui.New(root, tui.KeyConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
-	return root, c, m
+	root := workspace(t, url, envName, true)
+	c := saveCase(t, root, "Case", project.RequestDraft{Module: "api", Method: "GET", URL: "/?q={{value}}", Variables: map[string]string{"value": "ordinary"}})
+	return root, c
 }
-func scenarioTUIStart(t *testing.T, m *tui.Model) tea.Cmd {
-	t.Helper()
-	scenarioKeys(m, "space", "s", "l")
-	cmd := scenarioKeys(m, "space", "s", "r")
-	if cmd == nil {
-		t.Fatal("scenario run not scheduled", m.View().Content)
-	}
-	return cmd
-}
-func TestScenarioTUIAuthorValidateRunEditDeleteAndCLIParity(t *testing.T) {
-	requests := []string{}
+
+func TestScenarioAuthorCheckRunEditDeleteAndCLIParity(t *testing.T) {
+	var requests []string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.URL.RequestURI())
 		w.Header().Set("Content-Type", "application/json")
 		io.WriteString(w, `{"id":"from-response"}`)
 	}))
 	defer server.Close()
-	root, c, m := scenarioTUIWorkspace(t, server.URL, "staging")
-	scenarioKeys(m, "space", "s", "n")
-	id := regexp.MustCompile(`[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}`).FindString(m.View().Content)
-	if id == "" {
-		t.Fatal("new scenario editor absent", m.View().Content)
+	root, c := scenarioWorkspace(t, server.URL, "staging")
+	m := newModel(t, root, 160, 50)
+	steps := "[{id: first, caseId: " + c.ID + ", overrides: {value: step}, extracts: {id: /id}}, {id: second, caseId: " + c.ID + ", bindings: {value: {stepId: first, extract: id}}}]"
+	edit := filepath.Join(t.TempDir(), "steps.sed")
+	os.WriteFile(edit, []byte("s|^name: .*|name: Workflow|\ns|^steps: \\[\\]|steps: "+steps+"|\n"), 0600)
+	captured := filepath.Join(t.TempDir(), "template")
+	editorScript(t, `cp "$1" "`+captured+`"; sed -f "`+edit+`" "$1" > "$1.new" && mv "$1.new" "$1"`)
+	press(m, "3")
+	runEditor(t, m, send(m, "n"))
+	template, _ := os.ReadFile(captured)
+	if !strings.Contains(string(template), c.ID) || !strings.Contains(string(template), "Case") {
+		t.Fatalf("the template does not list saved requests:\n%s", template)
 	}
-	s := project.Scenario{ID: id, Name: "Workflow", Steps: []project.ScenarioStep{{ID: "first", CaseID: c.ID, Overrides: map[string]string{"value": "step"}, Extracts: map[string]string{"id": "/id"}}, {ID: "second", CaseID: c.ID, Bindings: map[string]project.ScenarioBinding{"value": {StepID: "first", Extract: "id"}}}}}
-	b, _ := json.Marshal(s)
-	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m.Update(tea.KeyPressMsg{Text: string(b)})
-	enter(m)
+	id := regexp.MustCompile(`(?m)^id: (\S+)`).FindStringSubmatch(string(template))[1]
 	saved, err := project.GetScenario(root, id)
 	if err != nil || len(saved.Steps) != 2 {
-		t.Fatalf("%+v %v %s", saved, err, m.View().Content)
+		t.Fatalf("%+v %v\n%s", saved, err, screen(m))
 	}
-	scenarioKeys(m, "space", "s", "v")
-	if !strings.Contains(m.View().Content, "Scenario valid") {
-		t.Fatal(m.View().Content)
+	wantScreen(t, m, "Saved “Workflow”", "2 steps")
+	press(m, "v")
+	wantScreen(t, m, "“Workflow” is valid")
+	press(m, "r")
+	if len(requests) != 2 || requests[0] != "/?q=step" || requests[1] != "/?q=from-response" {
+		t.Fatalf("%v", requests)
 	}
-	cmd := scenarioTUIStart(t, m)
-	m.Update(cmd())
-	if len(requests) != 2 || requests[0] != "/?q=step" || requests[1] != "/?q=from-response" || !strings.Contains(m.View().Content, "Successful: true") {
-		t.Fatalf("%v %s", requests, m.View().Content)
-	}
-	key(m, "esc")
+	wantScreen(t, m, "Passed", "first", "second", "200 OK")
+	press(m, "esc")
 	review, _ := project.ReviewAccess(root, "staging")
 	project.ApproveAccess(root, review)
 	var out, diag bytes.Buffer
-	code := cli.Run([]string{"scenario", "run", id, "--project", root, "--env", "staging", "--output", "json"}, strings.NewReader(""), &out, &diag)
-	if code != 0 || len(requests) != 4 || requests[2] != requests[0] || requests[3] != requests[1] {
+	if code := cli.Run([]string{"scenario", "run", id, "--project", root, "--env", "staging", "--output", "json"}, strings.NewReader(""), &out, &diag); code != 0 || len(requests) != 4 || requests[2] != requests[0] || requests[3] != requests[1] {
 		t.Fatalf("%d %s %v", code, &out, requests)
 	}
-	scenarioKeys(m, "space", "s", "e")
-	s.Name = "Renamed"
-	b, _ = json.Marshal(s)
-	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m.Update(tea.KeyPressMsg{Text: string(b)})
-	enter(m)
-	saved, err = project.GetScenario(root, id)
-	if err != nil || saved.Name != "Renamed" {
+	editorScript(t, `sed 's|^name: .*|name: Renamed|' "$1" > "$1.new" && mv "$1.new" "$1"`)
+	runEditor(t, m, send(m, "enter"))
+	if saved, err := project.GetScenario(root, id); err != nil || saved.Name != "Renamed" {
 		t.Fatalf("%+v %v", saved, err)
 	}
-	scenarioKeys(m, "space", "s", "x", "y")
+	press(m, "d")
+	wantScreen(t, m, "Delete “Renamed”?")
+	press(m, "y")
 	if _, err := project.GetScenario(root, id); err == nil {
-		t.Fatal("TUI deletion failed")
+		t.Fatal("not deleted")
 	}
 }
-func TestScenarioTUIConfirmsEveryProductionSendAndCancelsRemainingSteps(t *testing.T) {
-	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); io.WriteString(w, `{}`) }))
-	defer server.Close()
-	root, c, _ := scenarioTUIWorkspace(t, server.URL, "production")
-	s := project.Scenario{ID: uuid.NewString(), Name: "Production", ContinueOnFailure: true, Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}, {ID: "two", CaseID: c.ID}}}
+
+func productionScenario(t *testing.T, handler http.HandlerFunc, continueOnFailure bool) (string, *tui.Model) {
+	t.Helper()
+	server := httptest.NewServer(handler)
+	t.Cleanup(server.Close)
+	root, c := scenarioWorkspace(t, server.URL, "production")
+	s := project.Scenario{ID: uuid.NewString(), Name: "Production", ContinueOnFailure: continueOnFailure, Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}, {ID: "two", CaseID: c.ID}}}
 	if _, err := project.SaveScenario(root, s, "", false); err != nil {
 		t.Fatal(err)
 	}
-	m, err := tui.New(root, tui.KeyConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
-	for _, k := range []string{"space", "e", "l", "j", "space", "e", "s"} {
-		key(m, k)
-	}
-	cmd := scenarioTUIStart(t, m)
-	m.Update(cmd())
-	if calls.Load() != 0 || !strings.Contains(m.View().Content, "Confirm production scenario send?") || strings.Contains(m.View().Content, "q=") {
-		t.Fatal(m.View().Content)
-	}
-	_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
-	if cmd == nil {
-		t.Fatal("approval did not resume")
-	}
-	m.Update(cmd())
-	if calls.Load() != 1 || !strings.Contains(m.View().Content, "Confirm production scenario send?") {
-		t.Fatalf("calls=%d %s", calls.Load(), m.View().Content)
-	}
-	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	if cmd == nil {
-		t.Fatal("cancel did not await report")
-	}
-	m.Update(cmd())
-	if calls.Load() != 1 || !strings.Contains(m.View().Content, "scenario cancelled") || !strings.Contains(m.View().Content, "two: skipped") {
-		t.Fatalf("calls=%d %s", calls.Load(), m.View().Content)
-	}
-	// Run again and approve both actual sends.
-	key(m, "esc")
-	cmd = scenarioTUIStart(t, m)
-	m.Update(cmd())
-	for i := 0; i < 2; i++ {
-		_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
-		m.Update(cmd())
-	}
-	if calls.Load() != 3 || !strings.Contains(m.View().Content, "Successful: true") {
-		t.Fatalf("calls=%d %s", calls.Load(), m.View().Content)
-	}
+	m := newModel(t, root, 160, 50)
+	// Production is never reselected on reopen; choose it explicitly.
+	press(m, "e")
+	moveTo(t, m, "production")
+	press(m, "enter", "3")
+	return root, m
 }
-func TestScenarioTUICancelsActiveTransport(t *testing.T) {
+
+func TestScenarioAsksBeforeEveryProductionSend(t *testing.T) {
+	var calls atomic.Int32
+	_, m := productionScenario(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1); io.WriteString(w, `{}`) }, true)
+	press(m, "r")
+	wantScreen(t, m, "Send to production?", "paused before this step")
+	rejectScreen(t, m, "q=")
+	if calls.Load() != 0 {
+		t.Fatal("sent before confirmation")
+	}
+	press(m, "y")
+	if calls.Load() != 1 {
+		t.Fatalf("calls=%d", calls.Load())
+	}
+	wantScreen(t, m, "Send to production?")
+	press(m, "esc")
+	if calls.Load() != 1 {
+		t.Fatal("cancelling sent the next step")
+	}
+	wantScreen(t, m, "Failed", "skipped", "scenario cancelled")
+	press(m, "esc", "r", "y", "y")
+	if calls.Load() != 3 {
+		t.Fatalf("calls=%d", calls.Load())
+	}
+	wantScreen(t, m, "Passed")
+}
+
+func TestScenarioCancelsActiveTransport(t *testing.T) {
 	started := make(chan struct{})
 	var calls atomic.Int32
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { calls.Add(1); close(started); <-r.Context().Done() }))
 	defer server.Close()
-	root, c, _ := scenarioTUIWorkspace(t, server.URL, "staging")
-	s := project.Scenario{ID: uuid.NewString(), Name: "Wait", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}, {ID: "two", CaseID: c.ID}}}
-	project.SaveScenario(root, s, "", false)
-	m, _ := tui.New(root, tui.KeyConfig{})
-	cmd := scenarioTUIStart(t, m)
-	done := make(chan tea.Msg, 1)
+	root, c := scenarioWorkspace(t, server.URL, "staging")
+	project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Wait", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}, {ID: "two", CaseID: c.ID}}}, "", false)
+	m := newModel(t, root)
+	press(m, "3")
+	cmd := send(m, "r")
+	done := make(chan any, 1)
 	go func() { done <- cmd() }()
 	select {
 	case <-started:
 	case <-time.After(3 * time.Second):
-		t.Fatal("transport not started")
+		t.Fatal("transport never started")
 	}
-	scenarioKeys(m, "space", "s", "n")
-	if strings.Contains(m.View().Content, "Edit scenario JSON") {
-		t.Fatal("creation allowed during active execution")
+	if send(m, "n") != nil {
+		t.Fatal("started editing during a run")
 	}
-	m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
+	wantScreen(t, m, "Wait for the running request")
+	press(m, "esc")
 	select {
 	case msg := <-done:
 		m.Update(msg)
 	case <-time.After(3 * time.Second):
-		t.Fatal("transport cancellation blocked")
+		t.Fatal("cancelling did not stop the transport")
 	}
-	if calls.Load() != 1 || !strings.Contains(m.View().Content, "scenario cancelled") {
-		t.Fatal(m.View().Content)
+	if calls.Load() != 1 {
+		t.Fatalf("calls=%d", calls.Load())
 	}
+	wantScreen(t, m, "cancelled")
 }
 
-func TestSharedCaseTUIShowsAffectedScenariosBeforeSaving(t *testing.T) {
-	root, c, _ := scenarioTUIWorkspace(t, "http://localhost:12345", "staging")
-	s := project.Scenario{ID: uuid.NewString(), Name: "Affected", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}
-	if _, err := project.SaveScenario(root, s, "", false); err != nil {
-		t.Fatal(err)
-	}
-	m, err := tui.New(root, tui.KeyConfig{})
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
-	for _, k := range []string{"space", "c", "l", "space", "c", "o", "space", "c", "e"} {
-		key(m, k)
-	}
-	if !strings.Contains(m.View().Content, "Affected scenarios:") || !strings.Contains(m.View().Content, "scenarios/") {
-		t.Fatal(m.View().Content)
-	}
-	c.Name = "Changed"
-	b, _ := json.Marshal(c.Case)
-	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m.Update(tea.KeyPressMsg{Text: string(b)})
-	enter(m)
-	if !strings.Contains(m.View().Content, "Confirm shared case edit?") {
-		t.Fatal(m.View().Content)
-	}
-	before, _ := project.GetCase(root, c.ID)
-	if before.Name == "Changed" {
-		t.Fatal("shared edit saved before preview")
-	}
-	key(m, "y")
-	after, _ := project.GetCase(root, c.ID)
-	if after.Name != "Changed" {
-		t.Fatal("confirmed shared case edit not saved", m.View().Content)
-	}
-}
-
-func TestScenarioTUIConfirmsProductionRedirectBeforeContact(t *testing.T) {
+func TestScenarioAsksBeforeFollowingAProductionRedirect(t *testing.T) {
 	var calls atomic.Int32
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	_, m := productionScenario(t, func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
 		if r.URL.Path == "/" {
 			http.Redirect(w, r, "/redirected?token=sensitive", http.StatusFound)
-		} else {
-			io.WriteString(w, `{}`)
+			return
 		}
-	}))
-	defer server.Close()
-	root, c, _ := scenarioTUIWorkspace(t, server.URL, "production")
-	s := project.Scenario{ID: uuid.NewString(), Name: "Redirect", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}
-	if _, err := project.SaveScenario(root, s, "", false); err != nil {
-		t.Fatal(err)
+		io.WriteString(w, `{}`)
+	}, false)
+	press(m, "r", "y")
+	if calls.Load() != 1 {
+		t.Fatalf("calls=%d", calls.Load())
 	}
-	m, _ := tui.New(root, tui.KeyConfig{})
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
-	for _, k := range []string{"space", "e", "l", "j", "space", "e", "s"} {
-		key(m, k)
+	wantScreen(t, m, "Send to production?", "/redirected")
+	rejectScreen(t, m, "token=")
+	press(m, "esc")
+	if calls.Load() != 1 {
+		t.Fatal("cancelled redirect was followed")
 	}
-	cmd := scenarioTUIStart(t, m)
-	m.Update(cmd())
-	_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
-	m.Update(cmd())
-	if calls.Load() != 1 || !strings.Contains(m.View().Content, "Confirm production scenario send?") || !strings.Contains(m.View().Content, "/redirected") || strings.Contains(m.View().Content, "token=") {
-		t.Fatalf("unconfirmed redirect calls=%d %s", calls.Load(), m.View().Content)
-	}
-	_, cmd = m.Update(tea.KeyPressMsg{Code: tea.KeyEscape})
-	m.Update(cmd())
-	if calls.Load() != 1 || !strings.Contains(m.View().Content, "scenario cancelled") {
-		t.Fatalf("cancelled redirect contacted destination: %d %s", calls.Load(), m.View().Content)
-	}
-	key(m, "esc")
-	cmd = scenarioTUIStart(t, m)
-	m.Update(cmd())
-	for i := 0; i < 2; i++ {
-		_, cmd = m.Update(tea.KeyPressMsg{Text: "y", Code: 'y'})
-		m.Update(cmd())
-	}
-	if calls.Load() != 3 || !strings.Contains(m.View().Content, "Successful: true") {
-		t.Fatalf("approved redirect failed %d %s", calls.Load(), m.View().Content)
-	}
+	wantScreen(t, m, "scenario cancelled")
 }
 
-func TestScenarioTUIApprovesProtectedLoginForCLI(t *testing.T) {
+func TestScenarioLoginApprovalForTheCLI(t *testing.T) {
 	const token = "tui-approved-fresh-session"
 	var authenticated atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -292,17 +192,13 @@ func TestScenarioTUIApprovesProtectedLoginForCLI(t *testing.T) {
 		io.WriteString(w, `{"custom":"`+token+`","echo":"`+token+`"}`)
 	}))
 	defer server.Close()
-	root, login, _ := scenarioTUIWorkspace(t, server.URL, "staging")
+	root, login := scenarioWorkspace(t, server.URL, "staging")
 	login.Request.URL = "/login"
-	var err error
-	login, err = project.SaveCase(root, login.Case, login.Revision, false)
+	login, err := project.SaveCase(root, login.Case, login.Revision, false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	consumer, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "Authenticated", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/me", Headers: []project.RequestField{{Name: "Authorization", Value: "{{auth}}"}}}}, "", false)
-	if err != nil {
-		t.Fatal(err)
-	}
+	consumer := saveCase(t, root, "Authenticated", project.RequestDraft{Module: "api", Method: "GET", URL: "/me", Headers: []project.RequestField{{Name: "Authorization", Value: "{{auth}}"}}})
 	s, err := project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Login", Steps: []project.ScenarioStep{
 		{ID: "login", CaseID: login.ID, SecretExtracts: map[string]project.SecretExtraction{"session": {Pointer: "/custom", Destinations: []project.CredentialBinding{{Kind: "bearer", Module: "api", Destination: server.URL + "/me", In: "header", Field: "Authorization"}}}}},
 		{ID: "me", CaseID: consumer.ID, Bindings: map[string]project.ScenarioBinding{"auth": {StepID: "login", Extract: "session"}}},
@@ -311,41 +207,124 @@ func TestScenarioTUIApprovesProtectedLoginForCLI(t *testing.T) {
 		t.Fatal(err)
 	}
 	access, _ := project.ReviewAccess(root, "staging")
-	if err := project.ApproveAccess(root, access); err != nil {
-		t.Fatal(err)
-	}
-	runCLI := func(expected int) string {
+	project.ApproveAccess(root, access)
+	runCLI := func(expected int) {
 		t.Helper()
 		var out, diag bytes.Buffer
 		code := cli.Run([]string{"scenario", "run", s.ID, "--project", root, "--env", "staging", "--output", "json"}, strings.NewReader(""), &out, &diag)
 		if code != expected || strings.Contains(out.String()+diag.String(), token) {
 			t.Fatalf("code %d: %s %s", code, &out, &diag)
 		}
-		return out.String()
 	}
 	runCLI(4)
-	m, err := tui.New(root, tui.KeyConfig{})
+	m := newModel(t, root, 160, 50)
+	press(m, "3", "a")
+	wantScreen(t, m, "Approve protected logins?", "/custom", server.URL+"/me", "Authorization")
+	press(m, "esc")
+	runCLI(4)
+	press(m, "a", "y")
+	runCLI(0)
+	if !authenticated.Load() {
+		t.Fatal("the CLI did not attach the approved token")
+	}
+	press(m, "r")
+	wantScreen(t, m, "Passed")
+	rejectScreen(t, m, token)
+}
+
+func TestSharedRequestNamesItsScenariosBeforeSaving(t *testing.T) {
+	root, c := scenarioWorkspace(t, "http://localhost:12345", "staging")
+	if _, err := project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Affected", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}, "", false); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(t, root, 160, 50)
+	press(m, "2")
+	wantScreen(t, m, "Used by", "Affected")
+	press(m, "enter", "enter", "ctrl+u")
+	typeText(m, "/changed")
+	press(m, "enter", "ctrl+s")
+	wantScreen(t, m, "Change a shared request?", "Affected")
+	if before, _ := project.GetCase(root, c.ID); before.Request.URL == "/changed" {
+		t.Fatal("saved before confirming")
+	}
+	press(m, "y")
+	if after, _ := project.GetCase(root, c.ID); after.Request.URL != "/changed" {
+		t.Fatal("confirmed save did not write")
+	}
+}
+
+func TestHistoryPinViewAndCompare(t *testing.T) {
+	root := workspace(t, "http://127.0.0.1:1", "staging", false)
+	c, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "comparison", ComparisonIgnore: project.IgnoreRules{JSONPointers: []string{"/ignored"}, Headers: []string{"Date"}}, Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/"}}, "", false)
 	if err != nil {
 		t.Fatal(err)
 	}
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 100})
-	scenarioKeys(m, "space", "s", "l", "space", "s", "a")
-	view := m.View().Content
-	for _, text := range []string{"Approve protected", "/custom", server.URL + "/me", "Authorization"} {
-		if !strings.Contains(view, text) {
-			t.Fatal("incomplete review", view)
-		}
+	a, _ := project.SendCase(context.Background(), root, "local", c.ID, nil, project.SendOptions{})
+	b, _ := project.SendCase(context.Background(), root, "staging", c.ID, nil, project.SendOptions{})
+	m := newModel(t, root, 160, 50)
+	press(m, "4")
+	wantScreen(t, m, "2 runs", "failed")
+	press(m, "p")
+	wantScreen(t, m, "Pinned", "◆")
+	run, _ := project.GetRun(root, b.RunID)
+	if !run.Pinned {
+		t.Fatal("not pinned")
 	}
-	key(m, "esc")
-	runCLI(4)
-	scenarioKeys(m, "space", "s", "a", "y")
-	runCLI(0)
-	if !authenticated.Load() {
-		t.Fatal("CLI token was not attached")
+	press(m, "enter")
+	wantScreen(t, m, "Run "+b.RunID[:8], "failed")
+	press(m, "esc", "c", "j")
+	wantScreen(t, m, "comparing from here")
+	press(m, "c")
+	wantScreen(t, m, "Comparison", "Before", "After")
+	press(m, "esc", ":")
+	typeText(m, "compare two runs by id")
+	press(m, "enter", "ctrl+u")
+	typeText(m, a.RunID+" missing")
+	press(m, "enter")
+	wantScreen(t, m, "missing or evicted")
+	press(m, "ctrl+u")
+	typeText(m, a.RunID+" "+b.RunID)
+	press(m, "enter")
+	wantScreen(t, m, "Comparison")
+	for i := 0; i < 25; i++ {
+		press(m, "j")
 	}
-	cmd := scenarioTUIStart(t, m)
-	m.Update(cmd())
-	if strings.Contains(m.View().Content, token) || !strings.Contains(m.View().Content, "Successful: true") {
-		t.Fatal(m.View().Content)
+	view := screen(m)
+	if !strings.Contains(view, "/ignored") && !strings.Contains(view, "unavailable") {
+		t.Fatal(view)
 	}
+}
+
+func TestScenarioReportReopensFromHistory(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) { io.WriteString(w, `{}`) }))
+	defer server.Close()
+	root, c := scenarioWorkspace(t, server.URL, "staging")
+	s, err := project.SaveScenario(root, project.Scenario{ID: uuid.NewString(), Name: "Workflow", Steps: []project.ScenarioStep{{ID: "one", CaseID: c.ID}}}, "", false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := project.RunScenario(context.Background(), root, "staging", s.ID, project.ScenarioOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(t, root)
+	press(m, "4")
+	wantScreen(t, m, "scenario", "Workflow")
+	press(m, "enter")
+	wantScreen(t, m, "Passed", "one", "passed")
+}
+
+func TestCtrlCDuringAProductionPromptStopsTheScenario(t *testing.T) {
+	var calls atomic.Int32
+	_, m := productionScenario(t, func(w http.ResponseWriter, r *http.Request) { calls.Add(1); io.WriteString(w, `{}`) }, true)
+	press(m, "r")
+	wantScreen(t, m, "Send to production?")
+	press(m, "ctrl+c")
+	if calls.Load() != 0 {
+		t.Fatal("sent after cancelling")
+	}
+	wantScreen(t, m, "Failed", "scenario cancelled")
+	rejectScreen(t, m, "Running Production")
+	// Nothing is left running: a new run starts normally.
+	press(m, "esc", "r")
+	wantScreen(t, m, "Send to production?")
 }

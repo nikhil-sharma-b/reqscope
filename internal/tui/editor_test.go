@@ -1,224 +1,144 @@
 package tui_test
 
 import (
-	"encoding/json"
-	"io"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
-	"time"
 
-	tea "charm.land/bubbletea/v2"
+	"github.com/google/uuid"
 	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"github.com/nikhil-sharma-b/reqscope/internal/tui"
 )
 
-// Run the command through Bubble Tea itself, which owns terminal suspension.
-// Stop after the editor outcome reaches the model, without inspecting commands.
-type editorHarness struct {
-	*tui.Model
-	launch tea.Cmd
+func editorWorkspace(t *testing.T, body string) (string, project.CaseResource, *project.Credentials, *tui.Model) {
+	t.Helper()
+	root := workspace(t, "https://api.example.test", "staging", false)
+	vault := project.NewCredentials(&memoryStore{values: map[string]string{}})
+	if err := vault.Save(root, "staging", project.CredentialBinding{Name: "login", Kind: "bearer", Module: "api", Destination: "https://api.example.test/", In: "header", Field: "Authorization"}, "editor-private-token", true); err != nil {
+		t.Fatal(err)
+	}
+	c := saveCase(t, root, "Editor case", project.RequestDraft{Module: "api", Method: "POST", URL: "/", BodyType: "json", Body: body})
+	m := newCredentialModel(t, root, vault)
+	press(m, "2", "enter")
+	return root, c, vault, m
 }
 
-func (h *editorHarness) Init() tea.Cmd { return h.launch }
-func (h *editorHarness) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
-	if _, ok := msg.(tea.WindowSizeMsg); ok {
-		msg = tea.WindowSizeMsg{Width: 140, Height: 40}
-	}
-	_, cmd := h.Model.Update(msg)
-	view := h.View().Content
-	for _, outcome := range []string{"Edited body retained", "Invalid JSON body", "Editor cancelled or failed", "Editor closed without changes"} {
-		if strings.Contains(view, outcome) {
-			return h, tea.Quit
-		}
-	}
-	return h, cmd
-}
-
-func TestExternalEditorRoundTrips(t *testing.T) {
+func TestBodyEditorRoundTrips(t *testing.T) {
 	for _, tc := range []struct {
 		name, script, body, outcome string
 		changed                     bool
 	}{
-		{"success", `printf '%s' '{"edited":true}' > "$1"`, `{"edited":true}`, "Edited body retained", true},
-		{"invalid JSON", `printf '%s' '{' > "$1"`, `{`, "Invalid JSON body", true},
-		{"unchanged cancellation", `exit 0`, `{"token":"{{secret:login}}"}`, "Editor closed without changes", false},
-		{"failure after write", `printf changed > "$1"; exit 7`, `{"token":"{{secret:login}}"}`, "Editor cancelled or failed", false},
-		{"signal cancellation", `printf changed > "$1"; kill -INT $$`, `{"token":"{{secret:login}}"}`, "Editor cancelled or failed", false},
+		{"success", `printf '%s' '{"edited":true}' > "$1"`, `{"edited":true}`, "Body updated", true},
+		{"invalid JSON", `printf '%s' '{' > "$1"`, `{`, "not valid JSON", true},
+		{"no changes", `exit 0`, `{"token":"{{secret:login}}"}`, "No changes to the body", false},
+		{"failure after write", `printf changed > "$1"; exit 7`, `{"token":"{{secret:login}}"}`, "closed with an error", false},
+		{"signal", `printf changed > "$1"; kill -INT $$`, `{"token":"{{secret:login}}"}`, "closed with an error", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			t.Setenv("XDG_DATA_HOME", t.TempDir())
 			scratch := t.TempDir()
 			t.Setenv("TMPDIR", scratch)
-			root := t.TempDir()
-			snapshot, _ := project.Init(root, "Editor", false)
-			env, _ := snapshot.Resolve("staging")
-			env.BaseURLs["api"] = "https://api.example.test"
-			if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
-				t.Fatal(err)
-			}
-			if err := project.SelectEnvironment(root, "staging"); err != nil {
-				t.Fatal(err)
-			}
-			vault := project.NewCredentials(&tuiCredentialStore{values: map[string]string{}})
-			if err := vault.Save(root, "staging", project.CredentialBinding{Name: "login", Kind: "bearer", Module: "api", Destination: "https://api.example.test/", In: "header", Field: "Authorization"}, "editor-private-token", true); err != nil {
-				t.Fatal(err)
-			}
-			draft := project.RequestDraft{Module: "api", Method: "POST", URL: "/", BodyType: "json", Body: `{"token":"{{secret:login}}"}`}
-			saved, err := project.SaveCase(root, project.Case{ID: "bb6789be-1526-4422-9e98-540c7f848ae1", Name: "Editor case", Request: draft}, "", false)
-			if err != nil {
-				t.Fatal(err)
-			}
-			m, err := tui.NewWithCredentials(root, tui.KeyConfig{}, vault)
-			if err != nil {
-				t.Fatal(err)
-			}
-			m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-			for _, k := range []string{"space", "c", "l", "enter"} {
-				key(m, k)
-			}
-			script := filepath.Join(t.TempDir(), "editor.sh")
+			root, c, _, m := editorWorkspace(t, `{"token":"{{secret:login}}"}`)
 			captured := filepath.Join(t.TempDir(), "captured")
-			t.Setenv("EDITOR_CAPTURE", captured)
-			scriptText := "#!/bin/sh\ncat \"$1\" > \"$EDITOR_CAPTURE\"\n" + tc.script + "\n"
-			if err := os.WriteFile(script, []byte(scriptText), 0700); err != nil {
-				t.Fatal(err)
-			}
-			t.Setenv("VISUAL", "sh "+script)
-			t.Setenv("EDITOR", "does-not-exist")
-			for _, k := range []string{"space", "r"} {
-				key(m, k)
-			}
-			_, launch := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-			if launch == nil {
-				t.Fatal(m.View().Content)
-			}
-			runEditor(t, m, launch)
+			editorScript(t, `cat "$1" > "`+captured+`"`+"\n"+tc.script)
+			runEditor(t, m, send(m, "b"))
 			content, err := os.ReadFile(captured)
-			if err != nil || string(content) != draft.Body || strings.Contains(string(content), "editor-private-token") {
-				t.Fatalf("scratch content %q, %v", content, err)
+			if err != nil || string(content) != c.Request.Body || strings.Contains(string(content), "editor-private-token") {
+				t.Fatalf("editor saw %q, %v", content, err)
 			}
-			entries, err := os.ReadDir(scratch)
-			if err != nil || len(entries) != 0 {
-				t.Fatalf("scratch not cleaned: %v %v", entries, err)
+			if entries, _ := os.ReadDir(scratch); len(entries) != 0 {
+				t.Fatalf("scratch files left behind: %v", entries)
 			}
-			view := m.View().Content
-			if !strings.Contains(view, tc.outcome) || !strings.Contains(view, "NORMAL") || !strings.Contains(view, "Editor case") {
-				t.Fatal(view)
+			wantScreen(t, m, tc.outcome, "Editor case")
+			if cmd := send(m, "q"); (cmd == nil) != tc.changed {
+				t.Fatalf("quit protection wrong for changed=%v:\n%s", tc.changed, screen(m))
 			}
-			key(m, "q")
-			if strings.Contains(m.View().Content, "Unsaved request/case changes") != tc.changed {
-				t.Fatal(m.View().Content)
-			}
-			if tc.changed {
-				key(m, "c")
-			}
-			// Saving and reading the case confirms the body and case identity survived.
-			for _, k := range []string{"space", "c", "s"} {
-				key(m, k)
-			}
-			current, err := project.GetCase(root, saved.ID)
-			if err != nil || current.Request.Body != tc.body {
-				t.Fatalf("body %q, %v", current.Request.Body, err)
-			}
-			for _, k := range []string{"space", "r", "e"} {
-				key(m, k)
-			}
-			if !strings.Contains(m.View().Content, "INSERT") {
-				t.Fatal(m.View().Content)
-			}
-			key(m, "esc")
-			if !strings.Contains(m.View().Content, "NORMAL") {
-				t.Fatal(m.View().Content)
+			press(m, "esc", "ctrl+s")
+			if current, _ := project.GetCase(root, c.ID); current.Request.Body != tc.body {
+				t.Fatalf("saved body %q", current.Request.Body)
 			}
 			if tc.name == "invalid JSON" {
-				for _, k := range []string{"space", "r"} {
-					key(m, k)
-				}
-				_, cmd := m.Update(tea.KeyPressMsg{Code: 's', Text: "s"})
-				if cmd != nil || !strings.Contains(m.View().Content, "invalid JSON body") {
-					t.Fatalf("invalid body was not rejected: %s", m.View().Content)
-				}
+				press(m, "s")
+				wantScreen(t, m, "invalid JSON body")
 			}
 		})
 	}
 }
-func runEditor(t *testing.T, m *tui.Model, launch tea.Cmd) {
-	t.Helper()
-	p := tea.NewProgram(&editorHarness{Model: m, launch: launch}, tea.WithInput(nil), tea.WithOutput(io.Discard), tea.WithoutRenderer(), tea.WithoutSignalHandler())
-	timer := time.AfterFunc(5*time.Second, p.Kill)
-	defer timer.Stop()
-	if _, err := p.Run(); err != nil {
-		t.Fatalf("%v: %s", err, m.View().Content)
-	}
-}
 
-func TestExternalEditorStartFailure(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+func TestEditorThatCannotStartLeavesTheBody(t *testing.T) {
 	scratch := t.TempDir()
 	t.Setenv("TMPDIR", scratch)
-	root := t.TempDir()
-	project.Init(root, "Editor", false)
-	m, _ := tui.New(root, tui.KeyConfig{})
-	for _, k := range []string{"space", "r", "n"} {
-		key(m, k)
-	}
-	b, _ := json.Marshal(project.RequestDraft{Method: "POST", URL: "https://example.test", BodyType: "raw", Body: "original"})
-	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m.Update(tea.KeyPressMsg{Text: string(b)})
-	enter(m)
+	_, _, _, m := editorWorkspace(t, `"original"`)
 	t.Setenv("VISUAL", "")
 	t.Setenv("EDITOR", "reqscope-editor-does-not-exist")
-	for _, k := range []string{"space", "r"} {
-		key(m, k)
-	}
-	_, launch := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-	runEditor(t, m, launch)
-	if !strings.Contains(m.View().Content, "original") {
-		t.Fatal(m.View().Content)
-	}
-	entries, _ := os.ReadDir(scratch)
-	if len(entries) != 0 {
+	runEditor(t, m, send(m, "b"))
+	wantScreen(t, m, `"original"`, "closed with an error")
+	if entries, _ := os.ReadDir(scratch); len(entries) != 0 {
 		t.Fatal(entries)
 	}
 }
 
-func TestExternalEditorRejectsRegisteredCredentialBeforeExport(t *testing.T) {
-	t.Setenv("XDG_DATA_HOME", t.TempDir())
+func TestBodyWithAStoredCredentialNeverLeavesTheApp(t *testing.T) {
 	scratch := t.TempDir()
 	t.Setenv("TMPDIR", scratch)
-	root := t.TempDir()
-	snapshot, _ := project.Init(root, "Editor", false)
-	env, _ := snapshot.Resolve("staging")
-	env.BaseURLs["api"] = "https://api.example.test"
-	if err := project.SaveEnvironment(root, env.Environment, env.Revision, false, false); err != nil {
-		t.Fatal(err)
+	_, _, _, m := editorWorkspace(t, `"editor-private-token"`)
+	if cmd := send(m, "b"); cmd != nil {
+		t.Fatal("exported a stored credential to an editor")
 	}
-	vault := project.NewCredentials(&tuiCredentialStore{values: map[string]string{}})
-	if err := vault.Save(root, "staging", project.CredentialBinding{Name: "login", Kind: "bearer", Module: "api", Destination: "https://api.example.test/", In: "header", Field: "Authorization"}, "never-export-this", true); err != nil {
-		t.Fatal(err)
-	}
-	m, err := tui.NewWithCredentials(root, tui.KeyConfig{}, vault)
-	if err != nil {
-		t.Fatal(err)
-	}
-	m.Update(tea.WindowSizeMsg{Width: 140, Height: 40})
-	for _, k := range []string{"space", "r", "n"} {
-		key(m, k)
-	}
-	m.Update(tea.KeyPressMsg{Code: 'u', Mod: tea.ModCtrl})
-	m.Update(tea.KeyPressMsg{Text: `{"method":"POST","url":"/","bodyType":"raw","body":"never-export-this"}`})
-	enter(m)
-	for _, k := range []string{"space", "r"} {
-		key(m, k)
-	}
-	_, cmd := m.Update(tea.KeyPressMsg{Code: 'o', Text: "o"})
-	if cmd != nil || !strings.Contains(m.View().Content, "registered credential") {
-		t.Fatal(m.View().Content)
-	}
-	entries, _ := os.ReadDir(scratch)
-	if len(entries) != 0 {
+	wantScreen(t, m, "stored credential")
+	if entries, _ := os.ReadDir(scratch); len(entries) != 0 {
 		t.Fatal(entries)
 	}
+}
+
+func TestWholeRequestEditsAsJSON(t *testing.T) {
+	_, _, _, m := editorWorkspace(t, `{}`)
+	editorScript(t, `printf '%s' '{"module":"api","method":"PATCH","url":"/raw","bodyType":"raw","body":"","timeoutMs":5000}' > "$1"`)
+	runEditor(t, m, send(m, "E"))
+	wantScreen(t, m, "Request updated", "PATCH", "/raw")
+	editorScript(t, `printf '%s' '{"unknown":true}' > "$1"`)
+	runEditor(t, m, send(m, "E"))
+	wantScreen(t, m, "Not saved", "unknown", "e edit again")
+}
+
+func TestSavedRequestDetailsValidateChecks(t *testing.T) {
+	root := workspace(t, "https://api.example.test", "staging", false)
+	c := project.Case{ID: uuid.NewString(), Name: "Checks", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/"}}
+	if _, err := project.SaveCase(root, c, "", false); err != nil {
+		t.Fatal(err)
+	}
+	invalid := "id: " + c.ID + "\nname: Checks\nrequest: {module: api, method: GET, url: /, body: '', bodyType: ''}\nvalidation:\n  assertions:\n    - {kind: status-range, min: 300, max: 200}\n"
+	valid := "id: " + c.ID + "\nname: Checked\nrequest: {module: api, method: GET, url: /, body: '', bodyType: ''}\nvalidation:\n  responseSchema: true\n  assertions:\n    - {kind: status-equals, value: 200}\n    - {kind: header-present, name: x-test}\n"
+	dir := t.TempDir()
+	os.WriteFile(filepath.Join(dir, "invalid.yaml"), []byte(invalid), 0600)
+	os.WriteFile(filepath.Join(dir, "valid.yaml"), []byte(valid), 0600)
+	m := newModel(t, root)
+	press(m, "2")
+	editorScript(t, `cp "`+filepath.Join(dir, "invalid.yaml")+`" "$1"`)
+	runEditor(t, m, send(m, "E"))
+	wantScreen(t, m, "Not saved")
+	if saved, _ := project.GetCase(root, c.ID); len(saved.Validation) != 0 {
+		t.Fatal("invalid checks saved")
+	}
+	editorScript(t, `cp "`+filepath.Join(dir, "valid.yaml")+`" "$1"`)
+	runEditor(t, m, send(m, "e"))
+	saved, _ := project.GetCase(root, c.ID)
+	if saved.Name != "Checked" || len(saved.Validation) != 2 {
+		t.Fatalf("%+v\n%s", saved, screen(m))
+	}
+}
+
+func TestEmptyBodyStartsFromTheContractExample(t *testing.T) {
+	root := workspace(t, "https://api.example.test", "staging", false)
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	os.WriteFile(file, []byte("openapi: 3.0.3\ninfo: {title: API, version: '1'}\npaths:\n  /pets:\n    post:\n      requestBody: {required: true, content: {application/json: {example: {name: Rex}}}}\n      responses: {'200': {description: OK}}\n"), 0600)
+	if _, err := project.ImportSpecification(root, file, false); err != nil {
+		t.Fatal(err)
+	}
+	m := newModel(t, root)
+	press(m, "enter")
+	wantScreen(t, m, "JSON  empty  required  press b to use the example")
+	editorScript(t, `exit 0`)
+	runEditor(t, m, send(m, "b"))
+	wantScreen(t, m, "Body set from the contract example", `"name": "Rex"`)
 }

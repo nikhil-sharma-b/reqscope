@@ -1,160 +1,327 @@
 package tui
 
 import (
-	"fmt"
-	"github.com/nikhil-sharma-b/reqscope/internal/project"
 	"os"
 	"sort"
 	"strings"
 	"unicode"
 	"unicode/utf8"
+
+	"github.com/nikhil-sharma-b/reqscope/internal/project"
 )
 
-type Binding struct {
-	Action      string
-	Description string
-	Keys        []string
+// Every action is one key press. Actions belong to scopes, and the screen in
+// front of the person decides which scopes are live, so the same letter can
+// mean "delete" in a list and nothing at all in a text field. Esc (back or
+// cancel) and Ctrl+C (cancel or quit) are fixed so there is always a way out.
+type action string
+
+type scope int
+
+const (
+	scopeGlobal scope = iota
+	scopeNav
+	scopeBrowse
+	scopeEndpoints
+	scopeSaved
+	scopeScenarios
+	scopeHistory
+	scopeEnvs
+	scopeRequest
+	scopeForm
+	scopeResponse
+	scopeCommand
+)
+
+var scopeNames = map[scope]string{
+	scopeGlobal: "Everywhere", scopeNav: "Moving around", scopeBrowse: "Lists",
+	scopeEndpoints: "Endpoints", scopeSaved: "Saved requests", scopeScenarios: "Scenarios",
+	scopeHistory: "History", scopeEnvs: "Environments", scopeRequest: "Request",
+	scopeForm: "Request fields", scopeResponse: "Response", scopeCommand: "Commands",
 }
+
+const (
+	actQuit, actHelp, actPalette, actEnvironment                     action = "quit", "help", "commands", "environment"
+	actTab1, actTab2, actTab3, actTab4, actTab5                      action = "endpoints", "saved", "scenarios", "history", "environments"
+	actUp, actDown, actTop, actBottom, actPageDown, actPageUp        action = "up", "down", "top", "bottom", "page-down", "page-up"
+	actNextTab, actPrevTab, actFilter, actOpen                       action = "next-tab", "previous-tab", "filter", "open"
+	actNewRequest, actImport, actMethod, actGroup, actSchemas        action = "new-request", "import", "method-filter", "group-by-tag", "schemas"
+	actContract, actRefreshSource                                    action = "view-contract", "refresh-source"
+	actRunCase, actDuplicateCase, actDeleteCase, actEditCase         action = "run-case", "duplicate-case", "delete-case", "edit-case"
+	actRunScenario, actNewScenario, actDeleteScenario                action = "run-scenario", "new-scenario", "delete-scenario"
+	actCheckScenario, actApproveLogins                               action = "check-scenario", "approve-logins"
+	actPin, actDeleteRun, actCompare                                 action = "pin", "delete-run", "compare"
+	actUseEnv, actNewEnv, actDeleteEnv, actAuthorize, actCredentials action = "use-environment", "new-environment", "delete-environment", "allow-cli", "credentials"
+	actSend, actSave, actEditRaw                                     action = "send", "save", "edit-json"
+	actEdit, actAdd, actRemove, actMethodCycle, actBody, actBodyType action = "edit", "add", "remove", "method", "body", "body-type"
+	actAttach, actFind, actCopy, actHeaders                          action = "attach", "find", "copy", "headers"
+	actRenameProject, actValidateProject, actReloadProject           action = "rename-project", "check-project", "reload-project"
+	actEditContract, actExportContract, actCompareIDs                action = "edit-contract", "export-contract", "compare-ids"
+	actRetention, actPrune, actAttachRun, actReloadCase              action = "history-retention", "prune-history", "attach-run", "reload-case"
+	actClearRequest, actCancel, actSaveAsNew                         action = "clear-request", "cancel", "save-as-new"
+	actZoom, actPaneLeft, actPaneRight                               action = "zoom", "pane-left", "pane-right"
+)
+
+type actionDef struct {
+	id     action
+	label  string // footer wording, two words at most
+	desc   string // help and command wording
+	keys   []string
+	scopes []scope
+	footer int // position in the footer; 0 keeps it out
+}
+
+func actionTable() []actionDef {
+	g, n, b := []scope{scopeGlobal}, []scope{scopeNav}, []scope{scopeBrowse}
+	return []actionDef{
+		{actQuit, "quit", "Quit", []string{"q"}, g, 0},
+		{actHelp, "keys", "Show the keys for this screen", []string{"?"}, g, 99},
+		{actPalette, "commands", "Search every command", []string{":", "ctrl+p"}, g, 98},
+		{actEnvironment, "env", "Switch environment", []string{"e"}, g, 90},
+		{actTab1, "", "Go to endpoints", []string{"1"}, g, 0},
+		{actTab2, "", "Go to saved requests", []string{"2"}, g, 0},
+		{actTab3, "", "Go to scenarios", []string{"3"}, g, 0},
+		{actTab4, "", "Go to history", []string{"4"}, g, 0},
+		{actTab5, "", "Go to environments", []string{"5"}, g, 0},
+
+		{actUp, "", "Move up", []string{"k", "up"}, n, 0},
+		{actDown, "", "Move down", []string{"j", "down"}, n, 0},
+		{actTop, "", "Jump to the top", []string{"g", "home"}, n, 0},
+		{actBottom, "", "Jump to the bottom", []string{"G", "end"}, n, 0},
+		{actPageDown, "", "Page down", []string{"ctrl+d", "pgdown"}, n, 0},
+		{actPageUp, "", "Page up", []string{"ctrl+u", "pgup"}, n, 0},
+
+		{actNextTab, "", "Next tab", []string{"tab"}, g, 0},
+		{actPrevTab, "", "Previous tab", []string{"shift+tab"}, g, 0},
+		{actOpen, "open", "Open the selection", []string{"enter"}, b, 1},
+		{actFilter, "filter", "Filter the list", []string{"/"}, b, 2},
+		{actPaneLeft, "", "Move to the left pane: the list, or the request", []string{"h", "left"}, []scope{scopeBrowse, scopeRequest}, 0},
+		{actPaneRight, "", "Move to the right pane: the details, or the response", []string{"l", "right"}, []scope{scopeBrowse, scopeRequest}, 0},
+		{actZoom, "zoom", "Show the focused pane full screen, or the split again", []string{"z"}, []scope{scopeBrowse, scopeRequest}, 0},
+
+		{actImport, "import", "Import an OpenAPI file or Swagger URL", []string{"i"}, []scope{scopeEndpoints}, 3},
+		{actContract, "contract", "View the full contract of the selection", []string{"v"}, []scope{scopeEndpoints}, 4},
+		{actNewRequest, "new", "Start a blank request", []string{"n"}, []scope{scopeEndpoints, scopeSaved}, 5},
+		{actMethod, "method", "Show one HTTP method at a time", []string{"m"}, []scope{scopeEndpoints}, 6},
+		{actGroup, "group", "Group endpoints by tag", []string{"t"}, []scope{scopeEndpoints}, 7},
+		{actSchemas, "schemas", "Switch between endpoints and schemas", []string{"s"}, []scope{scopeEndpoints}, 8},
+		{actRefreshSource, "refresh", "Re-read the API source and review the changes", []string{"R"}, []scope{scopeEndpoints}, 0},
+
+		{actRunCase, "run", "Send the saved request", []string{"r"}, []scope{scopeSaved}, 2},
+		{actEditCase, "details", "Edit the name, checks and comparison rules", []string{"E"}, []scope{scopeSaved}, 3},
+		{actDuplicateCase, "copy", "Duplicate the saved request", []string{"c"}, []scope{scopeSaved}, 4},
+		{actDeleteCase, "delete", "Delete the saved request", []string{"d"}, []scope{scopeSaved}, 6},
+
+		{actRunScenario, "run", "Run the scenario", []string{"r"}, []scope{scopeScenarios}, 2},
+		{actNewScenario, "new", "Create a scenario", []string{"n"}, []scope{scopeScenarios}, 3},
+		{actCheckScenario, "check", "Check the scenario without sending anything", []string{"v"}, []scope{scopeScenarios}, 4},
+		{actApproveLogins, "approve logins", "Review protected login values the CLI may use", []string{"a"}, []scope{scopeScenarios}, 5},
+		{actDeleteScenario, "delete", "Delete the scenario", []string{"d"}, []scope{scopeScenarios}, 6},
+
+		{actPin, "pin", "Pin or unpin the run", []string{"p"}, []scope{scopeHistory}, 2},
+		{actCompare, "compare", "Compare runs: press on one, then on another", []string{"c"}, []scope{scopeHistory}, 3},
+		{actDeleteRun, "delete", "Delete the run", []string{"d"}, []scope{scopeHistory}, 4},
+
+		{actUseEnv, "use", "Send requests to this environment", []string{"u"}, []scope{scopeEnvs}, 2},
+		{actNewEnv, "new", "Create an environment", []string{"n"}, []scope{scopeEnvs}, 3},
+		{actCredentials, "credentials", "Manage stored credentials", []string{"c"}, []scope{scopeEnvs}, 4},
+		{actAuthorize, "allow CLI", "Review and allow CLI access", []string{"a"}, []scope{scopeEnvs}, 5},
+		{actDeleteEnv, "delete", "Delete the environment", []string{"d"}, []scope{scopeEnvs}, 6},
+
+		{actSend, "send", "Send the request", []string{"s"}, []scope{scopeRequest}, 1},
+		{actSave, "save", "Save the request", []string{"ctrl+s"}, []scope{scopeRequest}, 7},
+		{actEditRaw, "edit JSON", "Edit the whole request as JSON in your editor", []string{"E"}, []scope{scopeRequest}, 0},
+
+		{actEdit, "edit", "Edit the selected field", []string{"enter"}, []scope{scopeForm}, 2},
+		{actAdd, "add", "Add a row to this section", []string{"a"}, []scope{scopeForm}, 3},
+		{actRemove, "remove", "Remove the selected row", []string{"d"}, []scope{scopeForm}, 4},
+		{actBody, "body", "Edit the body in your editor", []string{"b"}, []scope{scopeForm}, 5},
+		{actMethodCycle, "method", "Change the HTTP method", []string{"m"}, []scope{scopeForm}, 6},
+		{actBodyType, "body type", "Change the body type", []string{"t"}, []scope{scopeForm}, 0},
+		{actAttach, "attach", "Attach a file to the body", []string{"f"}, []scope{scopeForm}, 0},
+
+		{actFind, "find", "Find text in the response", []string{"/"}, []scope{scopeResponse}, 2},
+		{actCopy, "copy", "Copy the response body", []string{"y"}, []scope{scopeResponse}, 3},
+		{actHeaders, "headers", "Show or hide response headers", []string{"H"}, []scope{scopeResponse}, 4},
+
+		{actRenameProject, "", "Rename the project", nil, []scope{scopeCommand}, 0},
+		{actValidateProject, "", "Check the project files", nil, []scope{scopeCommand}, 0},
+		{actReloadProject, "", "Reload the project files", nil, []scope{scopeCommand}, 0},
+		{actEditContract, "", "Add or change an endpoint or schema in the contract", nil, []scope{scopeCommand}, 0},
+		{actExportContract, "", "Copy the contract documents to the clipboard", nil, []scope{scopeCommand}, 0},
+		{actCompareIDs, "", "Compare two runs by ID", nil, []scope{scopeCommand}, 0},
+		{actRetention, "", "Choose how much history to keep", nil, []scope{scopeCommand}, 0},
+		{actPrune, "", "Remove unpinned runs beyond the history limits", nil, []scope{scopeCommand}, 0},
+		{actAttachRun, "", "Attach the selected run to the open saved request", nil, []scope{scopeCommand}, 0},
+		{actReloadCase, "", "Discard edits and reload the saved request", nil, []scope{scopeCommand}, 0},
+		{actSaveAsNew, "", "Save the request as a new saved request", nil, []scope{scopeCommand}, 0},
+		{actClearRequest, "", "Clear the request", nil, []scope{scopeCommand}, 0},
+		{actCancel, "", "Cancel the running request or scenario", nil, []scope{scopeCommand}, 0},
+	}
+}
+
+// contexts lists the scopes live on each screen, most specific first.
+var contexts = map[string][]scope{
+	"endpoints":    {scopeEndpoints, scopeBrowse, scopeNav, scopeGlobal},
+	"saved":        {scopeSaved, scopeBrowse, scopeNav, scopeGlobal},
+	"scenarios":    {scopeScenarios, scopeBrowse, scopeNav, scopeGlobal},
+	"history":      {scopeHistory, scopeBrowse, scopeNav, scopeGlobal},
+	"environments": {scopeEnvs, scopeBrowse, scopeNav, scopeGlobal},
+	"form":         {scopeForm, scopeRequest, scopeNav, scopeGlobal},
+	"response":     {scopeResponse, scopeRequest, scopeNav, scopeGlobal},
+}
+
+// KeyConfig is the optional keys.yaml: the leader key that opens the key menu
+// and action names mapped to key lists. An empty list unbinds an action; it
+// stays available from the key menu and the command search.
 type KeyConfig struct {
 	Leader   string              `yaml:"leader"`
 	Bindings map[string][]string `yaml:"bindings"`
 }
 
-func defaults() []Binding {
-	return []Binding{
-		{"contract-author", "Author local contract edit", []string{"<leader> d a"}}, {"contract-export", "Export contract documents to clipboard", []string{"<leader> d o"}},
-		{"import", "Import local specification", []string{"<leader> s i"}}, {"schemas", "Inspect schemas", []string{"<leader> s s"}},
-		{"down", "Move down", []string{"j", "down"}}, {"up", "Move up", []string{"k", "up"}},
-		{"first", "First item", []string{"g g"}}, {"last", "Last item", []string{"G"}},
-		{"half-down", "Half page down", []string{"ctrl+d"}}, {"half-up", "Half page up", []string{"ctrl+u"}},
-		{"pane-left", "Previous pane", []string{"ctrl+w h", "ctrl+w k"}}, {"pane-right", "Next pane", []string{"ctrl+w l", "ctrl+w j", "tab"}}, {"zoom", "Zoom focused pane", []string{"ctrl+w o"}},
-		{"endpoints", "Endpoints pane", []string{"g e"}}, {"request", "Request pane", []string{"g q", "<leader> r i"}}, {"response", "Response pane", []string{"g r", "<leader> r r"}}, {"history", "History pane", []string{"g h", "<leader> h l"}},
-		{"project", "Inspect project", []string{"<leader> p i"}}, {"validate", "Validate project", []string{"<leader> p v"}}, {"rename", "Edit project name", []string{"<leader> p n", "i"}}, {"save", "Save project name", []string{"<leader> p s"}}, {"reload", "Reload project", []string{"<leader> p r"}},
-		{"environments", "Environment templates", []string{"<leader> e l"}},
-		{"cases", "Cases pane", []string{"<leader> c l"}}, {"scenarios", "Scenarios pane", []string{"<leader> s l"}},
-		{"method-filter", "Cycle endpoint method filter", []string{"<leader> s m"}}, {"tag-group", "Toggle endpoint tag grouping", []string{"<leader> s t"}},
-		{"search", "Search focused pane", []string{"/"}}, {"endpoint-search", "Search endpoints", []string{"<leader> /"}}, {"next-match", "Next match", []string{"n"}}, {"previous-match", "Previous match", []string{"N"}},
-		{"open", "Open selection or edit project name", []string{"enter"}}, {"help", "Effective keybindings", []string{"?"}}, {"palette", "Command palette", []string{"<leader> :", ":"}}, {"quit", "Quit", []string{"q", "ctrl+c"}},
-		{"request-new", "New explicit request draft", []string{"<leader> r n"}},
-		{"request-compose", "Compose selected contract request", []string{"<leader> r c"}},
-		{"request-upload", "Select a local upload file reference", []string{"<leader> r f"}},
-		{"request-edit", "Edit current request draft", []string{"<leader> r e"}},
-		{"request-editor", "Edit request body in external editor", []string{"<leader> r o"}},
-		{"request-reset", "Clear current request draft", []string{"<leader> r x"}},
-		{"request-send", "Send current request", []string{"<leader> r s"}},
-		{"request-cancel", "Cancel running request", []string{"<leader> r k"}},
-		{"response-copy", "Copy retained response body", []string{"<leader> r y"}},
-		{"environment-delete", "Delete selected environment", []string{"<leader> e x"}},
-		{"environment-create", "Create environment", []string{"<leader> e c"}},
-		{"environment-edit", "Edit environment and variables", []string{"<leader> e e"}},
-		{"environment-select", "Select active environment", []string{"<leader> e s"}},
-		{"environment-authorize", "Authorize CLI destinations", []string{"<leader> e a"}},
-		{"credential-edit", "Add or replace protected credential", []string{"<leader> e k"}},
-		{"credential-delete", "Delete protected credential", []string{"<leader> e d"}},
-		{"credential-inspect", "Inspect credential names and state", []string{"<leader> e i"}},
-		{"scenario-create", "Create scenario", []string{"<leader> s n"}},
-		{"scenario-edit", "Edit selected scenario", []string{"<leader> s e"}},
-		{"scenario-delete", "Delete selected scenario", []string{"<leader> s x"}},
-		{"scenario-validate", "Validate selected scenario", []string{"<leader> s v"}},
-		{"scenario-approve-extractions", "Approve protected scenario extractions", []string{"<leader> s a"}},
-		{"scenario-run", "Run selected scenario", []string{"<leader> s r"}},
-		{"scenario-cancel", "Cancel running scenario", []string{"<leader> s k"}},
-		{"case-open", "Open selected case", []string{"<leader> c o"}},
-		{"case-save", "Save current request as case", []string{"<leader> c s"}},
-		{"case-edit", "Edit saved case", []string{"<leader> c e"}},
-		{"case-duplicate", "Duplicate selected case", []string{"<leader> c d"}},
-		{"case-delete", "Delete selected case", []string{"<leader> c x"}},
-		{"case-run", "Run selected case", []string{"<leader> c r"}},
-		{"compare", "Compare two retained run IDs", []string{"<leader> h d"}},
-		{"history-pin", "Pin selected run", []string{"<leader> h p"}},
-		{"history-unpin", "Unpin selected run", []string{"<leader> h u"}},
-		{"history-delete", "Delete selected unpinned run", []string{"<leader> h x"}},
-		{"history-prune", "Prune unpinned history", []string{"<leader> h c"}},
-		{"history-next", "Next history page", []string{"<leader> h n"}},
-		{"history-previous", "Previous history page", []string{"<leader> h b"}},
-		{"history-settings", "Edit history retention JSON", []string{"<leader> h s"}},
-		{"history-associate", "Associate run with current saved case", []string{"<leader> h a"}},
-		{"contract-refresh", "Preview contract refresh", []string{"<leader> d r"}},
-		{"case-reconcile", "Manually reconcile external case edits", []string{"<leader> c m"}}, {"case-reload", "Discard draft and reload case", []string{"<leader> c z"}},
-	}
+// Binding is one action with its effective keys.
+type Binding struct {
+	Action      string
+	Description string
+	Keys        []string
 }
+
+type keymap struct {
+	// leader opens the key menu; space unless keys.yaml says otherwise.
+	leader string
+	defs   []actionDef
+	byID   map[action]int
+	// lookup resolves a key within one scope.
+	lookup map[scope]map[string]action
+}
+
+// Bindings validates a key configuration and returns the effective bindings.
 func Bindings(c KeyConfig) ([]Binding, error) {
-	leader := c.Leader
+	k, err := newKeymap(c)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]Binding, 0, len(k.defs))
+	for _, d := range k.defs {
+		out = append(out, Binding{string(d.id), d.desc, append([]string(nil), d.keys...)})
+	}
+	return out, nil
+}
+
+func newKeymap(c KeyConfig) (*keymap, error) {
+	leader := strings.TrimSpace(c.Leader)
 	if leader == "" {
 		leader = "space"
 	}
-	if leader == " " {
-		leader = "space"
+	if strings.Contains(leader, " ") || leader == "esc" || leader == "ctrl+c" || !validKey(leader) {
+		return nil, project.Fail("invalid_input", "keys.yaml: leader %q must be a single key other than esc and ctrl+c", c.Leader)
 	}
-	if utf8.RuneCountInString(leader) != 1 && leader != "space" {
-		return nil, project.Fail("invalid_input", "leader must be one printable key or space")
+	k := &keymap{leader: leader, defs: actionTable(), byID: map[action]int{}, lookup: map[scope]map[string]action{}}
+	for i, d := range k.defs {
+		k.byID[d.id] = i
 	}
-	if leader != "space" {
-		r, _ := utf8.DecodeRuneInString(leader)
-		if !unicode.IsPrint(r) || unicode.IsSpace(r) {
-			return nil, project.Fail("invalid_input", "leader must be printable")
+	names := make([]string, 0, len(c.Bindings))
+	for name := range c.Bindings {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	for _, name := range names {
+		i, ok := k.byID[action(name)]
+		if !ok {
+			return nil, project.Fail("invalid_input", "keys.yaml: unknown action %q", name)
 		}
-	}
-	reserved := map[string]bool{"esc": true, "enter": true, "tab": true, "backspace": true}
-	if reserved[leader] || leader[0] >= '0' && leader[0] <= '9' {
-		return nil, project.Fail("invalid_input", "leader conflicts with a reserved key")
-	}
-	bindings := defaults()
-	known := map[string]bool{}
-	sequences := map[string]string{}
-	for i := range bindings {
-		b := &bindings[i]
-		known[b.Action] = true
-		if keys, ok := c.Bindings[b.Action]; ok {
-			b.Keys = keys
-		}
-		for j, seq := range b.Keys {
-			seq = strings.ReplaceAll(seq, "<leader>", leader)
-			tokens := strings.Fields(seq)
-			if len(tokens) == 0 {
-				return nil, project.Fail("invalid_input", "empty binding for %s", b.Action)
+		keys := []string{}
+		for _, key := range c.Bindings[name] {
+			key = strings.TrimSpace(key)
+			if key == " " || key == "" {
+				key = "space"
 			}
-			for _, token := range tokens {
-				if token == "esc" || token[0] >= '0' && token[0] <= '9' {
-					return nil, project.Fail("invalid_input", "binding %q uses a reserved key", seq)
+			if strings.Contains(key, " ") {
+				return nil, project.Fail("invalid_input", "keys.yaml: %q for %s is a sequence; bind a single key", key, name)
+			}
+			if key == "esc" || key == "ctrl+c" {
+				return nil, project.Fail("invalid_input", "keys.yaml: %s is reserved for going back and cancelling", key)
+			}
+			if !validKey(key) {
+				return nil, project.Fail("invalid_input", "keys.yaml: unsupported key %q for %s", key, name)
+			}
+			keys = append(keys, key)
+		}
+		k.defs[i].keys = keys
+	}
+	for _, d := range k.defs {
+		for _, s := range d.scopes {
+			if k.lookup[s] == nil {
+				k.lookup[s] = map[string]action{}
+			}
+			for _, key := range d.keys {
+				if other, ok := k.lookup[s][key]; ok {
+					return nil, project.Fail("invalid_input", "keys.yaml: %s is bound to both %s and %s", key, other, d.id)
 				}
-				if !validKey(token) {
-					return nil, project.Fail("invalid_input", "unsupported key %q", token)
+				k.lookup[s][key] = d.id
+			}
+		}
+	}
+	for s, keys := range k.lookup {
+		if id, ok := keys[leader]; ok {
+			return nil, project.Fail("invalid_input", "keys.yaml: %s is the leader but is also bound to %s in %s", leader, id, scopeNames[s])
+		}
+	}
+	// A key must mean one thing on every screen where it is live.
+	for name, chain := range contexts {
+		seen := map[string]action{}
+		for _, s := range chain {
+			for key, id := range k.lookup[s] {
+				if other, ok := seen[key]; ok && other != id {
+					return nil, project.Fail("invalid_input", "keys.yaml: %s means both %s and %s on the %s screen", key, other, id, name)
 				}
-			}
-			seq = strings.Join(tokens, " ")
-			if old, ok := sequences[seq]; ok {
-				return nil, project.Fail("invalid_input", "binding %q conflicts between %s and %s", seq, old, b.Action)
-			}
-			sequences[seq] = b.Action
-			b.Keys[j] = seq
-		}
-	}
-	for action := range c.Bindings {
-		if !known[action] {
-			return nil, project.Fail("invalid_input", "unknown keybinding action %s", action)
-		}
-	}
-	for a, action := range sequences {
-		for b, other := range sequences {
-			if strings.HasPrefix(b, a+" ") {
-				return nil, project.Fail("invalid_input", "binding %q (%s) conflicts with prefix of %q (%s)", a, action, b, other)
+				seen[key] = id
 			}
 		}
 	}
-	return bindings, nil
+	return k, nil
 }
+
 func validKey(s string) bool {
 	if utf8.RuneCountInString(s) == 1 {
 		r, _ := utf8.DecodeRuneInString(s)
 		return unicode.IsPrint(r) && !unicode.IsSpace(r)
 	}
 	switch s {
-	case "space", "enter", "tab", "backspace", "up", "down", "left", "right", "ctrl+c", "ctrl+d", "ctrl+u", "ctrl+w":
+	case "space", "enter", "tab", "shift+tab", "backspace", "delete", "up", "down", "left", "right", "home", "end", "pgup", "pgdown":
+		return true
+	}
+	for _, prefix := range []string{"ctrl+", "alt+"} {
+		if rest, ok := strings.CutPrefix(s, prefix); ok && utf8.RuneCountInString(rest) == 1 {
+			r, _ := utf8.DecodeRuneInString(rest)
+			return unicode.IsPrint(r) && !unicode.IsSpace(r)
+		}
+	}
+	if rest, ok := strings.CutPrefix(s, "f"); ok && len(rest) <= 2 && rest != "" && strings.Trim(rest, "0123456789") == "" {
 		return true
 	}
 	return false
 }
+
+func (k *keymap) resolve(chain []scope, key string) (action, bool) {
+	for _, s := range chain {
+		if id, ok := k.lookup[s][key]; ok {
+			return id, true
+		}
+	}
+	return "", false
+}
+
+func (k *keymap) def(id action) actionDef { return k.defs[k.byID[id]] }
+
+// key is the first key for an action, as the footer shows it.
+func (k *keymap) key(id action) string {
+	if d := k.def(id); len(d.keys) > 0 {
+		return d.keys[0]
+	}
+	return ""
+}
+
 func loadKeys(path string) (KeyConfig, error) {
 	var c KeyConfig
 	if path == "" {
@@ -166,48 +333,4 @@ func loadKeys(path string) (KeyConfig, error) {
 	}
 	err = project.Decode(b, &c)
 	return c, err
-}
-func help(bindings []Binding) string {
-	var lines []string
-	for _, b := range bindings {
-		keys := strings.Join(b.Keys, ", ")
-		if keys == "" {
-			keys = "unbound"
-		}
-		lines = append(lines, fmt.Sprintf("%-20s %s", keys, b.Description))
-	}
-	return strings.Join(lines, "\n")
-}
-
-// continuation is one key that can follow a pending prefix. A group leads
-// to further keys rather than to an action.
-type continuation struct {
-	key, label string
-	group      bool
-}
-
-func continuations(bindings []Binding, prefix string) []continuation {
-	next := map[string]continuation{}
-	for _, b := range bindings {
-		for _, seq := range b.Keys {
-			if strings.HasPrefix(seq, prefix+" ") {
-				parts := strings.Fields(strings.TrimPrefix(seq, prefix+" "))
-				if len(parts) > 1 {
-					next[parts[0]] = continuation{key: parts[0], label: "+more keys", group: true}
-				} else if _, ok := next[parts[0]]; !ok {
-					next[parts[0]] = continuation{key: parts[0], label: b.Description}
-				}
-			}
-		}
-	}
-	var keys []string
-	for key := range next {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	result := make([]continuation, 0, len(keys))
-	for _, key := range keys {
-		result = append(result, next[key])
-	}
-	return result
 }

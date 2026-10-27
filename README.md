@@ -11,7 +11,7 @@ bin/reqscope project inspect --project ./my-api --output json
 bin/reqscope tui --project ./my-api
 ```
 
-With no arguments, Reqscope opens the TUI only when both stdin and stdout are terminals. Otherwise it prints usage and exits. Starting the TUI without a discovered project opens a path/name initialization form. Tab switches fields, Enter initializes, and Esc quits. Explicit `tui` refuses nonterminal streams and JSON output.
+With no arguments, Reqscope opens the TUI only when both stdin and stdout are terminals. Otherwise it prints usage and exits. Starting the TUI without a discovered project opens a folder/name form. Tab or Enter moves to the next field, Enter on the last creates the project, and Esc quits. Explicit `tui` refuses nonterminal streams and JSON output.
 
 `--project` accepts a directory or its `reqscope.yaml`. Without it, CLI commands look for `reqscope.yaml` in the current directory and its ancestors. They never reopen a previously used project automatically.
 
@@ -53,8 +53,8 @@ Inspection includes inherited path parameters, operation inputs/responses, descr
 
 ## Swagger UI and raw URL imports
 
-Open `Space s i`, paste a Swagger UI or raw JSON/YAML URL, and press Enter.
-Review the source origin, then press Enter to approve fetching. If discovery
+Press `i` on the Endpoints tab, paste a Swagger UI or raw JSON/YAML URL, and press
+Enter. Review the source origin, then press Enter to approve fetching. If discovery
 finds several specifications, use j/k and Enter to choose one. Review the
 contract preview and press Enter to apply it. Esc cancels without importing.
 Approval stays in the local user data directory for this project and origin.
@@ -139,49 +139,111 @@ JSON stdout contains exactly one envelope with `schemaVersion`, `success`, `data
 
 Execution precedence follows the specification: unsuccessful scenarios use 6 with per-step causes, ad hoc transport failures use 5, and pre-execution access denial uses 4. Project validation does not authorize execution.
 
-## TUI keys
+## TUI
 
-The project pane supports editing and saving the project name. Environment templates are inspectable. Endpoint and schema panes list imported resources. Enter opens their full contract details, which scroll with j/k. Request and response panes support composing and sending requests. Case and scenario panes support saved workflows. The history pane lists retained runs and scenario reports. Enter reopens the selected evidence.
+The TUI has two screens. **Browse** lists what the project holds in five tabs,
+with a preview of the selection on wide terminals. **Request** edits one request
+beside the response it produced. Every action is a single key, and the bottom
+line always shows the keys that work on the current screen.
 
-- `j`/`k`, arrows, `gg`/`G`, counts such as `2j`, and `Ctrl-d`/`Ctrl-u` navigate.
-- `Ctrl-w h/j/k/l` switches panes; Tab advances; `Ctrl-w o` zooms.
-- `ge`, `gq`, `gr`, `gh` jump to endpoint, request, response and history panes.
-- `/` searches the focused pane; `n`/`N` advances filtered matches.
-- `i` or Enter edits the project name. Esc leaves insert mode and retains edits.
-- `Space p i/v/n/s/r` inspects, validates, renames, saves or reloads the project.
-- `Space s i` opens file or URL import. Enter previews, a second Enter applies, and Esc cancels. `Space s s` opens schemas.
-- `Space e l` opens environment templates. `Space r i/r` opens request/response panes; `Space c l`, `Space s l` and `Space h l` open cases, scenarios and history. `Space /` opens endpoint search.
-- `?` shows help; `:` or `Space :` opens the command palette. Arrow keys select palette commands; Enter runs one.
-- `q` quits. Leaving a dirty project or quitting asks for save, discard or cancel.
+`Space` opens the key menu, LazyVim style: a popup lists what the next key
+does, grouped by topic (`space r` request, `space e` environments, `space g` go
+to, and so on). It reaches every command, including those with no single key.
+`Backspace` steps back a level and `Esc` closes it.
 
-Pending prefixes display a floating continuation menu; Esc cancels them. Help and the palette use the effective action registry, including remappings and unbound actions. Help scrolls with `j`/`k`. Narrow terminals show the focused pane. Resizing preserves focus, pending keys, selection and draft buffers. Clean project resources reload once per second; a changed project revision retains a dirty name and reports a conflict.
+Both screens are a left pane and a right pane: the list and its details on
+Browse, the request and its response on Request. The keys for them are the
+same on both:
 
-The workspace follows the design language of
-[jira-tui](https://github.com/nikhil-sharma-b/jira-tui): panes fill the screen
-in rounded frames with their name and focus key set into the top edge, and only
-the focused frame is drawn in the accent colour. Colours adapt to light and dark
-terminals and are named for what they mark: paths and JSON keys share the
-identity colour, methods and response statuses are coloured by kind, and
-metadata stays quiet. Endpoints are a table with a bold header, row numbers and
-a solid selection band; columns that do not fit are dropped from the right, and
-the selected endpoint's source then appears beneath it. Wide terminals show
-endpoints beside stacked request and response panes; compact terminals and zoom
-show only the focused pane. Below the panes sit the active destination and one
-status line with the mode, workspace, feedback and pending keys; pending
-prefixes open a continuation menu in the bottom-right corner. Request JSON is
-pretty-printed for display without modifying the draft.
+- `h`/`l` (or `←`/`→`) move between the panes; the focused frame is drawn in
+  the accent colour, and the other pane's frame shows the key that reaches it.
+- `j`/`k`, `Ctrl+d`/`Ctrl+u` and `g`/`G` move in, or scroll, the focused pane.
+- `z` shows the focused pane full screen; `h`/`l` still switch while zoomed.
+- `Esc` steps back one level at a time: out of the zoom, then from the right
+  pane to the left one, then off the screen.
+
+On narrow terminals one pane shows at a time, and its frame names the other.
+
+| Key | Anywhere |
+| --- | --- |
+| `1`–`5` or `Tab`/`Shift+Tab` | Endpoints, Saved, Scenarios, History, Environments, from either screen |
+| `h`/`l`, `z` | Move between the left and right pane, zoom the focused one |
+| `j`/`k` or arrows, `g`/`G`, `Ctrl+d`/`Ctrl+u` | Move, jump to top/bottom, page |
+| `Enter` | Open the selection |
+| `/` | Filter the list as you type; `Esc` clears it |
+| `e` | Switch the environment requests go to |
+| `?` | Keys for the current screen |
+| `:` or `Ctrl+p` | Search every command, including ones without a key |
+| `Esc` | Go back, close or cancel |
+| `q` | Quit; asks first if saved requests have unsaved edits |
+| `Ctrl+c` | Cancel what is running, or quit |
+
+| Tab | Keys |
+| --- | --- |
+| Endpoints | `Enter` open a request, `v` full contract, `i` import, `n` blank request, `m` one method at a time, `t` group by tag, `s` schemas, `R` refresh the API |
+| Saved | `Enter` open, `r` run, `E` edit name, checks and comparison rules, `c` duplicate, `d` delete |
+| Scenarios | `Enter` edit, `r` run, `n` new, `v` check, `a` approve protected logins, `d` delete |
+| History | `Enter` view the run, `p` pin or unpin, `c` compare (press on one run, then another), `d` delete |
+| Environments | `Enter` edit, `u` use, `n` new, `c` credentials, `a` allow CLI access, `d` delete |
+
+On the request screen the form lists the URL, path parameters, query
+parameters, headers, body and variables. Parameters the contract defines but
+the request does not use yet appear dimmed with their example; `Enter` on one
+starts from the example. Under the URL, the address the request will reach is
+shown in full, with query values left out and unfilled parameters highlighted.
+
+| Key | Request screen |
+| --- | --- |
+| `s` | Send |
+| `Enter` | Edit the selected field; `Enter` keeps the edit, `Esc` drops it |
+| `a` / `d` | Add a row to the section (`name=value`, or `Name: value` for headers) / remove the selected row |
+| `b` | Edit the body in `$VISUAL`/`$EDITOR`; an empty body starts from the contract example |
+| `t` / `f` / `m` | Change the body type / attach a file / change the method of a blank request |
+| `E` | Edit the whole request as JSON for timeouts, redirects and limits |
+| `Ctrl+s` | Save as a saved request, or save changes to one |
+| `/`, `y`, `H` | In the response: find, copy the body, show headers |
+
+Drafts are kept per endpoint and per saved request for the session, so moving
+between them never loses typing. Saved requests with unsaved edits are marked
+`edited`. If a saved request changes on disk, clean drafts reload; edited ones
+keep their edits, and saving asks whether to keep yours or take the version on
+disk. Saving a request that scenarios use names them first. Every production
+send, including scenario steps and redirects, asks for `y` first. Deletes take
+`y`; `Enter` never confirms one.
+
+Scenarios, saved request details and contract changes open in your editor as
+commented YAML. If what you save does not validate, the error is shown and `e`
+reopens the editor with your text. Environments, credentials and history
+limits use forms inside the app.
+
+The interface is built for large APIs: drawing and moving never read files or
+walk the whole contract, filters are computed once per keystroke, only visible
+rows are drawn, and the once-a-second check for outside changes compares file
+metadata and re-reads only what changed, off the interface thread. With 400
+endpoints a keypress takes about half a millisecond.
+
+Colours follow HTTP: methods use the hues Swagger UI made familiar, response
+codes reuse them by class, and everything else stays quiet. Violet marks focus
+and keys. The response status and a production environment are the only
+filled badges. Colours have light and dark variants chosen from the terminal's
+background.
 
 Key configuration is read from the OS config directory's `reqscope/keys.yaml`, or `--keys FILE` on `tui`. On Linux the usual path is `$XDG_CONFIG_HOME/reqscope/keys.yaml` or `~/.config/reqscope/keys.yaml`; on macOS it is `~/Library/Application Support/reqscope/keys.yaml`.
 
 ```yaml
-leader: ","
 bindings:
-  help: ["H"]
-  quit: ["q", "ctrl+c"]
-  half-down: []
+  help: ["K"]
+  send: ["ctrl+r", "s"]
+  environment: []
 ```
 
-Bindings use space-separated sequences, such as `ctrl+w h`. `<leader>` expands to the configured leader. Empty lists unbind actions. Duplicate bindings, action/prefix conflicts, unknown actions and reserved Esc/count keys are rejected at startup. Navigation bindings are suspended during text entry.
+Names are the actions listed by `?`, such as `send`, `save`, `filter`,
+`run-case` and `allow-cli`. Each binding is one key. An empty list unbinds an
+action; it stays in the command search. A key may mean different things on
+screens that never appear together, but never two things on one screen. Unknown
+actions, key sequences, conflicts and the reserved `esc` and `ctrl+c` are
+rejected at startup. `leader: ","` changes the key that opens the key menu; it
+must be one key that nothing else uses.
 
 ## Development
 
@@ -201,7 +263,7 @@ bin/reqscope endpoint search --project ./my-api --tag pets --group-by tag --offs
 
 Search returns `items`, `total`, `empty` and `nextOffset`. Pass a non-null `nextOffset` as the next `--offset`, keeping the query and filters unchanged. The default page size is 100, with a maximum of 1000. Pagination describes the current workspace; imports between pages may change results. Grouping includes an operation in each distinct tag group while retaining its endpoint ID.
 
-In the TUI, `Space /` searches all endpoints as you type. `/` filters the focused pane and retains the global endpoint query. `Space s m` cycles the method filter; `Space s t` toggles tag grouping. `n` and `N` navigate matches, and Enter opens the selected contract with source and module context. These actions also appear in `?` help and the command palette. Narrow terminals show one focused pane; pane switches and selection work as in the full layout.
+In the TUI, `/` on the Endpoints tab filters with the same search as you type, and Esc clears it. `m` cycles the method filter and `t` toggles tag grouping. Enter opens the selected endpoint as a request; `v` shows its full contract with source and diagnostics. Narrow terminals hide the preview.
 
 Environment settings and CLI access
 -----------------------------------
@@ -211,12 +273,12 @@ Environment IDs stay fixed when names change. Use `environment create` or
 ordinary variables. Base URLs support `{{variable}}` references from the
 selected environment. Undefined or cyclic references fail before authorization.
 
-In the TUI, Space e l opens environments, Space e e edits the selected environment
-as JSON, and Space e c creates one. Ctrl+u clears the editor; Enter saves and Esc
-cancels. Space e s selects the active environment. Space e a shows the resolved
-base URLs, exact origins, production classification and binding fingerprint;
-press y to authorize CLI access. Changing these settings invalidates approval.
-Lowering production classification requires a separate TUI confirmation.
+In the TUI, the Environments tab lists environments. Enter edits the selected
+one in a form with a base URL row for every imported API; `n` creates one and
+`Ctrl+s` saves. `u` (or `e` from anywhere) selects the active environment. `a`
+shows the resolved base URLs, exact origins and protected bindings; press `y`
+to authorize CLI access. Changing these settings invalidates approval. Lowering
+production classification requires a separate TUI confirmation.
 
 `environment check-access --env staging --module api [--url URL]` checks the
 shared access policy without sending a request. Every future CLI network runner
@@ -281,18 +343,16 @@ Timeouts are bounded at one day and retained bodies at 1 GiB. There are no
 automatic retries. Authorization, Proxy-Authorization and Cookie headers require
 protected credential references. Literal authentication headers are rejected.
 
-In the TUI, select an environment with Space e s. Space r c composes the selected
-endpoint and shows required inputs, descriptions and example suggestions.
-Space r n creates an explicit draft. Space r e edits the retained draft as JSON;
-Ctrl+u clears the editor, Enter or Esc retains the buffer. Space r x clears the
-draft to allow composing another endpoint. Space r s sends; every production
-send requires y confirmation with method and resolved URL without query values.
-Esc cancels confirmation or an active request. Draft edits and destination
-changes invalidate production confirmation. Space r k also cancels transport.
+In the TUI, select an environment with `e`. Enter on an endpoint opens it as a
+request, showing required inputs, descriptions and example suggestions; `n`
+starts a blank request. `s` sends; every production send requires `y`
+confirmation with method and resolved URL without query values, and hides the
+request while it asks. Esc cancels confirmation or an active request. Draft
+edits and destination changes invalidate production confirmation.
 
-Responses show status, duration, headers and body. Use / to filter response
-lines, normal motions to scroll, and Space r y to copy the retained body through
-the terminal clipboard. Binary bodies show metadata and cannot be searched or
+Responses show status, duration, checks, headers and body. In the response,
+`/` filters body lines, the usual motions scroll, and `y` copies the retained
+body through the terminal clipboard. Binary bodies show metadata and cannot be searched or
 copied as text. Truncated bodies are labelled incomplete for full-body
 validation. Clipboard support depends on the terminal's OSC52 support.
 
@@ -306,8 +366,10 @@ headers, retained byte count and binary/truncation flags in `data`.
 Protected credentials
 ---------------------
 
-Select the active environment, then use `Space e k` to add or replace a named
-credential. Tab moves between fields and Enter advances or saves. Value entry
+On the Environments tab, select an environment and press `c` for its
+credentials, then `n` to add one or Enter to replace the selected one. Tab
+moves between fields, arrows choose among options, and Enter on the last field
+saves. Value entry
 is masked, and stored values cannot be revealed. Basic credentials use
 `username:password`; bearer credentials contain the token alone. Bearer and
 basic credentials attach to Authorization. API keys may bind to an exact header,
@@ -315,14 +377,15 @@ query field or the body. Bindings include the module, exact origin and exact
 URL path. A redirect to a different path requires a different binding and is
 rejected before sending credentials. Fields and paths do not use wildcards.
 
-Use `Space e i` for names and configured state, and `Space e d` to delete a
-credential by name with confirmation. Adding, replacing or deleting a credential
-removes the environment's CLI approval. Use `Space e a` to review and approve
-access again. These actions also appear in help and the command palette.
+The credentials list shows names and whether each value is stored; `d` deletes
+one with confirmation. Adding, replacing or deleting a credential removes the
+environment's CLI approval. Use `a` on the environment to review and approve
+access again.
 
 Credential values use Linux Secret Service over D-Bus or the macOS Keychain.
-If the OS store is unavailable or locked, the TUI explains the failure and offers
-an explicit session-only choice. There is no plaintext fallback and no automatic
+If the OS store is unavailable or locked, the TUI shows only environment IDs,
+explains the failure, and offers an explicit session-only choice; `r` retries
+once the store is unlocked. There is no plaintext fallback and no automatic
 installation or service configuration. Session values disappear when the process
 exits and cannot be used by a separate CLI process. Missing values require TUI
 replacement; ordinary project variables do not become protected credentials.
@@ -412,13 +475,13 @@ Saved runs include `caseId`; explicit drafts and dirty TUI sends report
 `draft: true`. Optional validation settings are retained, but running a case
 with them currently fails before sending until validation execution is added.
 
-In the TUI, `<leader> c l` lists cases, `c o` opens the selection, `c r` runs it,
-`c d` duplicates it, and `c x` requests deletion. `<leader> c s` saves the visible
-request, opening the case JSON editor for a new case; `c e` edits case metadata
-and inputs. Enter saves the case editor. Leaving or quitting with dirty inputs
-prompts to save, discard, or cancel. Saves check the original revision; a
-conflict preserves the buffer for reconciliation. Unsaved sends use the visible
-draft and keep the saved case unchanged.
+In the TUI, the Saved tab lists cases. Enter opens one, `r` runs it, `c`
+duplicates it and `d` requests deletion. `Ctrl+s` on the request screen saves
+the visible request, asking for a name the first time; `E` on the Saved tab
+edits the name, validation and comparison rules as YAML. Quitting with dirty
+inputs asks first. Saves check the original revision; a conflict keeps the
+draft and asks whether to keep it or take the version on disk. Unsaved sends
+use the visible draft and keep the saved case unchanged.
 
 ### Form bodies and local uploads
 
@@ -447,9 +510,9 @@ accepted. Paths must be explicit, without variable or credential references.
 Saved cases retain paths and never store uploaded bytes. Raw binary bodies use
 `bodyType: "raw"` and `bodyFile` instead of `body`.
 
-In the TUI, compose a contract request or edit the JSON draft, then press
-`Space r f` to choose a file reference. Enter the field name, use `j/k` to move,
-`Enter` to open a directory or select a file, and `h` to visit the parent directory.
+In the TUI, open a request with a raw or multipart body and press `f` to choose
+a file reference. Enter the field name, use `j/k` to move, `Enter` to open a
+directory or select a file, and `h` to visit the parent directory.
 Raw bodies use the selected file as `bodyFile`. Multipart bodies add the reference
 to `form`. JSON draft editing also supports repeated file entries.
 
@@ -467,8 +530,8 @@ never expanded as templates. Response output uses the existing sanitizer.
 
 ## External body editor
 
-Use `Space r o` or the `request-editor` command to edit the current inline raw
-or JSON body. Reqscope uses `$VISUAL`, then `$EDITOR`, then `vi`. Editor settings
+Press `b` on the request screen to edit the current inline raw or JSON body. An
+empty body opens on the contract's example. Reqscope uses `$VISUAL`, then `$EDITOR`, then `vi`. Editor settings
 may include arguments, such as `code --wait`. The editor must wait until editing
 finishes before it exits.
 
@@ -484,7 +547,7 @@ File-backed bodies and structured forms use the existing request and upload
 editors instead.
 
 Saved cases can include response validation, authored with `case create` or
-`case update` JSON/YAML input, or the TUI's saved case JSON editor:
+`case update` JSON/YAML input, or `E` on the TUI's Saved tab:
 
 ```json
 "validation": {
@@ -584,12 +647,12 @@ revisions and contract digests. Unsuccessful scenarios exit 6, including
 transport failures inside a scenario; access denial before any send exits 4,
 and cancellation exits 130. Ctrl+C cancels active transport and further steps.
 
-In the TUI, `<leader> s l` lists scenarios, `s n` creates one, `s e` edits the
-selected scenario JSON, `s v` validates, `s r` runs, `s x` deletes, and `s k`
-cancels. Enter saves the editor; Esc cancels editing. Production requires a
-confirmation showing method and sanitized URL before each step send. Esc at
-that prompt cancels the whole scenario. A shared-case save shows affected
-scenarios and asks for confirmation before writing.
+In the TUI, the Scenarios tab lists scenarios. `n` creates one and Enter edits
+the selected one as YAML in your editor, with the saved request IDs listed in
+a comment; `v` validates, `r` runs, `d` deletes, and Esc cancels a run.
+Production requires a confirmation showing method and sanitized URL before each
+step send. Esc at that prompt cancels the whole scenario. A shared-case save
+names the affected scenarios and asks for confirmation before writing.
 
 Secure login chaining
 --------------------
@@ -613,9 +676,8 @@ prefix. API keys use `kind: "api-key"` and a header, query or body placement.
 All destinations for one token use the same kind. Body placement authorizes
 that exact destination's body and uses an empty `field`.
 
-In the TUI, select the scenario and press `<leader> s a`. Review the JSON
-Pointer, source cases, permitted exact destination URLs and placements, and
-active environment. Press `y` to approve or Esc to cancel. CLI commands can
+In the TUI, select the scenario and press `a`. Review the JSON Pointer,
+permitted exact destination URLs and placements, and active environment. Press `y` to approve or Esc to cancel. CLI commands can
 prepare candidate metadata and run approved scenarios, but cannot approve it.
 Changing a scenario, source case, contract or environment settings requires
 fresh TUI approval. CLI environment access still needs its separate approval.
@@ -660,10 +722,10 @@ Zero limits remove all applicable unpinned runs. Limits count serialized evidenc
 bytes; SQLite indexes and page overhead add disk space beyond that amount.
 
 List output omits bodies and response details; get limits each body preview to
-4096 bytes and bounds header and check previews. The TUI reopens retained results
-with Enter from `g h`. History pages contain 50 entries. Leader actions under
-`h` are `n` next page, `b` previous page, `p` pin, `u` unpin, `x` delete,
-`c` cleanup, `s` edit retention JSON and `a` associate with the current saved case.
+4096 bytes and bounds header and check previews. The TUI's History tab reopens
+retained results with Enter and loads older runs as you scroll. `p` pins or
+unpins and `d` deletes; cleanup, retention limits and associating a run with the
+open saved request are in the command search (`:`).
 Request body evidence is capped at 1 MiB. Uploads and bodies that cannot be safely
 reopened retain metadata. Binary and incomplete unsafe bodies are withheld.
 
@@ -699,9 +761,10 @@ is selected. The empty pointer ignores the whole JSON body. Header ignores are
 case-insensitive. Rules never change stored evidence and do not affect execution
 or assertions. `input-schema get comparison.ignore` describes the input shape.
 
-In the TUI, `Space h d` opens comparison with the selected history ID prefilled.
-Enter two IDs separated by a space, use Ctrl+u to clear, then Enter to compare.
-The report scrolls with j/k and closes with Esc. Saved case rules apply.
+In the TUI's History tab, press `c` on one run, move to another and press `c`
+again to compare them. "Compare two runs by ID" in the command search accepts
+any two IDs. The report scrolls with j/k and closes with Esc. Saved case rules
+apply.
 
 Comparisons expose up to 100 differences with 1024-byte value and path previews;
 output clipping is explicitly reported. JSON traversal stops at depth 64. At most
@@ -741,12 +804,12 @@ key when sharing a local source bundle. Remote document keys retain their source
 URLs. Cases and scenarios are separate project resources and are not serialized
 into ordinary OpenAPI. Credentials, approvals and history are excluded.
 
-In the TUI, `Space d a` opens the local contract JSON editor. Set the edit intent,
-choose `create`, `update` or `delete`, and press Enter to preview affected cases
-and scenarios. Enter applies; Esc returns to editing. The selected endpoint or
-schema chooses the source, or the first source is used from other panes.
-`Space d o` copies the contract document bundle to the terminal clipboard and
-opens an inspection view.
+In the TUI, "Add or change an endpoint or schema" in the command search opens a
+local contract edit as YAML in your editor. Set the edit intent, choose
+`create`, `update` or `delete`, and save to preview affected cases and
+scenarios; Enter applies. The selected endpoint or schema chooses the source,
+or the first source is used from other tabs. "Copy the contract documents"
+copies the bundle to the terminal clipboard and opens an inspection view.
 
 ### Refresh and concurrent edits
 
@@ -776,12 +839,12 @@ request's module, method and URL, and clear `disconnected`. A returning backend
 operation does not reconnect a case automatically. Case updates require the
 current revision as usual. Contract and case changes share a recoverable transaction.
 
-In the TUI, `Space d r` previews the selected source, Enter applies and Esc cancels.
-Clean external case changes reload during polling. Dirty buffers remain available;
-`Space c z` discards the case draft and reloads, while `Space c m` displays the
-external case for manual comparison. Enter accepts that revision while retaining
-local inputs for further editing and saving. Invalid external files show errors
-and retain the last valid view. Unsaved project-name edits survive contract refresh.
+In the TUI, `R` on the Endpoints tab previews the selected source, Enter applies
+and Esc cancels. Clean external case changes reload during polling. Dirty drafts
+remain available and are marked; saving shows both versions and offers `o` to
+keep yours or `t` to take the one on disk. "Discard edits and reload" in the
+command search drops the draft. Invalid external files show errors and retain
+the last valid view.
 
 ## Installation and release acceptance
 
@@ -799,7 +862,7 @@ Ordinary variables are scoped to an explicit environment. `variables list` and
 inputs contain `name`, string `value` and that `revision`; deletion takes the
 variable name and an input containing `revision`. Empty string values are valid.
 Use the corresponding `input-schema get variables.create|update|delete` schema.
-These commands edit the same settings as the TUI environment JSON editor.
+These commands edit the same settings as the TUI environment form.
 
 ```sh
 reqscope variables list --env staging --project ./my-api --output json
@@ -809,7 +872,7 @@ reqscope variables delete temporary --env staging --input revision.json --projec
 reqscope environment delete obsolete --input revision.json --project ./my-api --preview --output json
 ```
 
-`Space e x` confirms deletion of the selected environment. Deletion revokes its
+`d` on the TUI's Environments tab confirms deletion of the selected environment. Deletion revokes its
 CLI grant and extraction approvals, clears its local selection, and retains OS
 credentials and production protection. Recreating the UUID requires fresh access
 approval and cannot lower production classification through CLI authoring.
@@ -821,7 +884,7 @@ by `scenarioRunId` and `stepId`. Reports retain failures and skipped-step reason
 Pre-execution access/extraction denial returns exit 4 without starting a scenario
 history entry. A run that starts and then fails retains its report. `scenario run`
 and `history get` return at most 50 step summaries with `totalSteps` and `stepsTruncated`; inspect
-individual step run IDs for bounded exchange previews. The TUI history pane
+individual step run IDs for bounded exchange previews. The TUI's History tab
 reopens the full aggregate. Pin a report and any step baselines you need to keep:
 step records and aggregates have independent retention, so pinning a report does
 not prevent its linked exchanges from being evicted. The report itself retains

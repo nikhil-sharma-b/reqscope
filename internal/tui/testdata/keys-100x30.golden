@@ -1,0 +1,30 @@
+ Petstore  ╭─ Keys ─────────────────────────────────────────────────────────────────────╮  ● staging
+╭─ Endpoint│                                                                            │────── l ─╮
+│  3 endpoi│ Endpoints                                                                  │          │
+│ ▌GET     │   i                Import an OpenAPI file or Swagger URL                   │          │
+│  POST    │   v                View the full contract of the selection                 │          │
+│  PUT     │   n                Start a blank request                                   │          │
+│          │   m                Show one HTTP method at a time                          │          │
+│          │   t                Group endpoints by tag                                  │          │
+│          │   s                Switch between endpoints and schemas                    │          │
+│          │   R                Re-read the API source and review the changes           │          │
+│          │                                                                            │          │
+│          │ Lists                                                                      │          │
+│          │   enter            Open the selection                                      │          │
+│          │   /                Filter the list                                         │          │
+│          │   h left           Move to the left pane: the list, or the request         │          │
+│          │   l right          Move to the right pane: the details, or the response    │          │
+│          │   z                Show the focused pane full screen, or the split again   │          │
+│          │                                                                            │          │
+│          │ Everywhere                                                                 │          │
+│          │   q                Quit                                                    │          │
+│          │   ?                Show the keys for this screen                           │          │
+│          │   : ctrl+p         Search every command                                    │          │
+│          │   e                Switch environment                                      │          │
+│          │   1                Go to endpoints                                         │          │
+│          │   2                Go to saved requests                                    │          │
+│          │   3                Go to scenarios                                         │          │
+│          ├───────────────────────────────────────────────────────────── ↓ 1–24 of 41 ─┤          │
+│          │ j/k scroll   esc close                                                     │          │
+╰──────────╰────────────────────────────────────────────────────────────────────────────╯──────────╯
+ enter open   / filter   i import   v contract   n new   m method   space menu   ? keys             
