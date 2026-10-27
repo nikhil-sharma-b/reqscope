@@ -67,25 +67,44 @@ func keyPress(m *Model, key string) {
 
 // TestRenderCostDoesNotGrowWithTheAPI guards the fix for slow navigation in
 // large APIs: drawing and moving must not re-read, re-filter or re-encode
-// every endpoint. The limits are far above the expected cost so only a
-// return to per-frame work over the whole API fails them.
+// every endpoint. A screen costs the same to draw whatever the API's size, so
+// the test compares a small API with a large one rather than holding either to
+// a fixed time, which shared CI machines under the race detector cannot keep.
 func TestRenderCostDoesNotGrowWithTheAPI(t *testing.T) {
-	m := fixture(t, 2000)
-	m.Update(tea.WindowSizeMsg{Width: 160, Height: 50})
-	m.View()
-	measure := func(name string, n int, fn func()) {
-		start := time.Now()
-		for range n {
-			fn()
+	cost := func(endpoints int) map[string]time.Duration {
+		m := fixture(t, endpoints)
+		m.Update(tea.WindowSizeMsg{Width: 160, Height: 50})
+		m.View()
+		out := map[string]time.Duration{}
+		// The best of three rounds keeps a busy machine's pauses out.
+		measure := func(name string, n int, fn func()) {
+			for range 3 {
+				start := time.Now()
+				for range n {
+					fn()
+				}
+				if d := time.Since(start) / time.Duration(n); out[name] == 0 || d < out[name] {
+					out[name] = d
+				}
+			}
 		}
-		if avg := time.Since(start) / time.Duration(n); avg > 15*time.Millisecond {
-			t.Errorf("%s takes %v per step with 2000 endpoints", name, avg)
+		measure("drawing", 50, func() { m.View() })
+		measure("moving", 100, func() { keyPress(m, "j"); m.View() })
+		keyPress(m, "/")
+		measure("filtering", 10, func() { keyPress(m, "1"); m.View() })
+		return out
+	}
+	small, large := cost(20), cost(2000)
+	// Screen-sized work keeps the large API within about one and a half times
+	// the small one; a pass over every endpoint per frame makes it three to
+	// four times. Filtering has to scan the list, so it is allowed more.
+	limit := map[string]float64{"drawing": 2, "moving": 2, "filtering": 4}
+	for name, base := range small {
+		got := large[name]
+		if float64(got) > limit[name]*float64(base)+float64(time.Millisecond) {
+			t.Errorf("%s takes %v per step with 2000 endpoints against %v with 20", name, got, base)
 		}
 	}
-	measure("drawing", 50, func() { m.View() })
-	measure("moving", 100, func() { keyPress(m, "j"); m.View() })
-	keyPress(m, "/")
-	measure("filtering", 10, func() { keyPress(m, "1"); m.View() })
 }
 
 func TestGoldenScreens(t *testing.T) {

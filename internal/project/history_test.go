@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -20,6 +21,10 @@ func TestHistoryReopensSanitizedEvidenceAndProtectsPins(t *testing.T) {
 		w.Write([]byte(`{"token":"history-body-secret","ok":true}`))
 	}))
 	defer server.Close()
+	// macOS keeps user data under the home folder rather than XDG_DATA_HOME,
+	// so a temporary home keeps the test's history out of the real one.
+	home := t.TempDir()
+	t.Setenv("HOME", home)
 	root := requestWorkspace(t, server.URL)
 	c, err := project.SaveCase(root, project.Case{ID: uuid.NewString(), Name: "history", Request: project.RequestDraft{Module: "api", Method: "GET", URL: "/"}}, "", false)
 	if err != nil {
@@ -69,7 +74,11 @@ func TestHistoryReopensSanitizedEvidenceAndProtectsPins(t *testing.T) {
 	if err = project.PruneHistory(root); err != nil {
 		t.Fatal(err)
 	}
-	dbs, _ := filepath.Glob(filepath.Join(os.Getenv("XDG_DATA_HOME"), "reqscope", "history", "*.sqlite"))
+	data := os.Getenv("XDG_DATA_HOME")
+	if runtime.GOOS == "darwin" {
+		data = filepath.Join(home, "Library", "Application Support")
+	}
+	dbs, _ := filepath.Glob(filepath.Join(data, "reqscope", "history", "*.sqlite"))
 	if len(dbs) != 1 {
 		t.Fatal(dbs)
 	}
