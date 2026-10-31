@@ -285,3 +285,47 @@ func TestXMLAuthenticationPositionsAndTruncation(t *testing.T) {
 		}
 	}
 }
+
+func TestCredentialPrefixScopeCoversOnlyPathsBeneathIt(t *testing.T) {
+	var reached []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		reached = append(reached, r.URL.EscapedPath())
+		if r.Header.Get("X-API-Key") != "prefix-value" {
+			t.Errorf("credential missing on %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+	root := requestWorkspace(t, server.URL)
+	vault := project.NewCredentials(&credentialStore{values: map[string]string{}})
+	for _, bad := range []string{"/v1/*/users", "/v1*", "/v1/**", "/v1/../*", "/v1//*", "/%2e%2e/*"} {
+		b := project.CredentialBinding{Name: "key", Kind: "api-key", Module: "api", Destination: server.URL + bad, In: "header", Field: "X-API-Key"}
+		if err := vault.Save(root, "staging", b, "prefix-value", false); err == nil {
+			t.Fatalf("invalid scope %s accepted", bad)
+		}
+	}
+	b := project.CredentialBinding{Name: "key", Kind: "api-key", Module: "api", Destination: server.URL + "/v1/*", In: "header", Field: "X-API-Key"}
+	if err := vault.Save(root, "staging", b, "prefix-value", false); err != nil {
+		t.Fatal(err)
+	}
+	r, _ := project.ReviewAccess(root, "staging")
+	if err := project.ApproveAccess(root, r); err != nil {
+		t.Fatal(err)
+	}
+	send := func(target string) error {
+		_, err := project.Send(context.Background(), root, "staging", project.RequestDraft{Module: "api", Method: "GET", URL: target, Headers: []project.RequestField{{Name: "X-API-Key", Value: "{{secret:key}}"}}}, project.SendOptions{Credentials: vault})
+		return err
+	}
+	for _, allowed := range []string{"/v1/users", "/v1/users/42/orders", "/v1/"} {
+		if err := send(allowed); err != nil {
+			t.Fatalf("%s denied: %v", allowed, err)
+		}
+	}
+	for _, denied := range []string{"/v1", "/v1evil", "/v2/users", "/", "/v1/../admin", "/v1/%2e%2e/admin", "/v1/a%2fb", "/v1//admin"} {
+		if err := send(denied); err == nil {
+			t.Fatalf("%s accepted outside prefix scope", denied)
+		}
+	}
+	if len(reached) != 3 {
+		t.Fatalf("server reached by %v", reached)
+	}
+}
