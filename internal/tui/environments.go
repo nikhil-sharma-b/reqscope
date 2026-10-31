@@ -507,7 +507,7 @@ func (m *Model) credentialForm(e project.Resource, name string, recovery bool) m
 	destination := ""
 	if !recovery && len(m.data.moduleList) > 0 {
 		if base := e.BaseURLs[m.data.moduleList[0]]; base != "" {
-			destination = strings.TrimRight(base, "/") + "/*"
+			destination = strings.TrimRight(base, "/") + "/"
 		}
 	}
 	nameField := &formField{label: "Name", input: newInput(name, "login"), note: "Requests refer to it as {{secret:name}}"}
@@ -519,7 +519,7 @@ func (m *Model) credentialForm(e project.Resource, name string, recovery bool) m
 			nameField,
 			{label: "Type", choices: kinds, names: []string{"bearer token", "API key", "basic auth"}},
 			module,
-			{label: "Sent to", input: newInput(destination, "https://api.example.com/v1/*"), note: "Exact URL, or end with /* to cover every path beneath it"},
+			{label: "Sent to", input: newInput(destination, "https://api.example.com/"), note: "Exact URL, or end with /* to cover every path beneath it"},
 			{label: "Placed in", choices: []string{"header", "query", "body"}},
 			{label: "Field", input: newInput("Authorization", "Authorization"), note: "Header or parameter name; leave empty for a body"},
 			value,
