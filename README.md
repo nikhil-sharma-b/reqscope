@@ -396,6 +396,12 @@ Request drafts contain opaque references, for example:
 {"module":"api","method":"GET","url":"/items","headers":[{"name":"Authorization","value":"{{secret:login}}"}]}
 ```
 
+A credential destination is an exact URL, or a URL whose path ends with `/*`
+to cover every path beneath that prefix: `https://api.example.com/v1/*`
+allows `/v1/users` and `/v1/users/42`, but not `/v1`, `/v1evil` or paths
+with dot segments, empty segments or encoded separators. `*` is allowed only
+as the final segment.
+
 Header and query values must consist of the reference alone. Body references
 can appear inside a raw or JSON body; JSON values retain correct escaping.
 Use the explicit query list for query credentials. References may pass through

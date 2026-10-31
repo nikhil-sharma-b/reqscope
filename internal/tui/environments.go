@@ -519,7 +519,7 @@ func (m *Model) credentialForm(e project.Resource, name string, recovery bool) m
 			nameField,
 			{label: "Type", choices: kinds, names: []string{"bearer token", "API key", "basic auth"}},
 			module,
-			{label: "Sent to", input: newInput(destination, "https://api.example.com/"), note: "The exact URL prefix the credential may go to"},
+			{label: "Sent to", input: newInput(destination, "https://api.example.com/"), note: "Exact URL, or end with /* to cover every path beneath it"},
 			{label: "Placed in", choices: []string{"header", "query", "body"}},
 			{label: "Field", input: newInput("Authorization", "Authorization"), note: "Header or parameter name; leave empty for a body"},
 			value,

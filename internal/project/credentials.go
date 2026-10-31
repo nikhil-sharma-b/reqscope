@@ -142,6 +142,9 @@ func (c *Credentials) Save(root, env string, b CredentialBinding, value string, 
 		if u.Path == "" {
 			u.Path = "/"
 		}
+		if !validDestinationScope(u.EscapedPath()) {
+			return Fail("invalid_input", "credential destination path may only end with /* to cover a path prefix")
+		}
 		b.Destination = u.String()
 		switch b.Kind {
 		case "bearer", "basic":
@@ -278,6 +281,49 @@ func (c *Credentials) Inspect(root, env string) ([]SecretState, error) {
 	return result, nil
 }
 
+// validDestinationScope accepts an exact clean path, or one whose last
+// segment is "*" to cover every path beneath that prefix.
+func validDestinationScope(path string) bool {
+	if strings.Contains(path, "*") && (!strings.HasSuffix(path, "/*") || strings.Count(path, "*") != 1) {
+		return false
+	}
+	return cleanEscapedPath(strings.TrimSuffix(path, "*"))
+}
+
+// cleanEscapedPath rejects dot segments, empty segments and encoded
+// separators, so a prefix check cannot be escaped by path normalization.
+func cleanEscapedPath(path string) bool {
+	lower := strings.ToLower(path)
+	for _, encoded := range []string{"%2e", "%2f", "%5c", "\\"} {
+		if strings.Contains(lower, encoded) {
+			return false
+		}
+	}
+	segments := strings.Split(path, "/")
+	for i, segment := range segments {
+		last := i == len(segments)-1
+		if segment == "." || segment == ".." || (segment == "" && i > 0 && !last) {
+			return false
+		}
+	}
+	return true
+}
+
+// destinationPathPermits reports whether a bound destination path covers a
+// request path: exact match, or segment-aligned prefix for a "/*" binding.
+func destinationPathPermits(bound, target string) bool {
+	if bound == "" {
+		bound = "/"
+	}
+	if target == "" {
+		target = "/"
+	}
+	if prefix, ok := strings.CutSuffix(bound, "*"); ok && strings.HasSuffix(prefix, "/") {
+		return cleanEscapedPath(target) && strings.HasPrefix(target, prefix)
+	}
+	return bound == target
+}
+
 type credentialPosition struct {
 	Destination string
 	Module      string
@@ -312,17 +358,13 @@ func checkSecretPosition(items map[string]localCredential, review AccessReview, 
 		}
 		bound, _ := Origin(item.Destination)
 		bu, _ := url.Parse(item.Destination)
-		permitted := item.Module == module && origin == bound && u.EscapedPath() == bu.EscapedPath() && item.In == in && item.Field == field
+		permitted := item.Module == module && origin == bound && destinationPathPermits(bu.EscapedPath(), u.EscapedPath()) && item.In == in && item.Field == field
 		if len(item.Destinations) > 0 {
 			permitted = false
 			for _, destination := range item.Destinations {
 				targetOrigin, _ := Origin(destination.Destination)
 				targetURL, _ := url.Parse(destination.Destination)
-				path := targetURL.EscapedPath()
-				if path == "" {
-					path = "/"
-				}
-				if destination.Module == module && targetOrigin == origin && path == u.EscapedPath() && destination.In == in && destination.Field == field && destination.Kind == item.Kind {
+				if destination.Module == module && targetOrigin == origin && destinationPathPermits(targetURL.EscapedPath(), u.EscapedPath()) && destination.In == in && destination.Field == field && destination.Kind == item.Kind {
 					permitted = true
 				}
 			}
