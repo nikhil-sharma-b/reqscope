@@ -81,3 +81,48 @@ func TestBodySampleStopsAtDepth(t *testing.T) {
 		t.Fatal("expected sample")
 	}
 }
+
+func TestResponseSamples(t *testing.T) {
+	pet := map[string]any{"type": "object", "properties": map[string]any{"name": map[string]any{"type": "string"}}}
+	ep := project.Endpoint{Operation: map[string]any{"responses": map[string]any{
+		"200": map[string]any{"description": "OK", "content": map[string]any{
+			"application/xml":  map[string]any{"example": "<pet/>"},
+			"application/json": map[string]any{"schema": pet},
+		}},
+		"204": map[string]any{"description": "No content"},
+		"404": map[string]any{"description": "Missing", "content": map[string]any{"text/plain": map[string]any{"example": "not found"}}},
+	}}}
+	want := map[string]any{"200": map[string]any{"name": "string"}, "404": "not found"}
+	if got := project.ResponseSamples(ep); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%#v", got)
+	}
+}
+
+func TestResponseSamplesSwagger2(t *testing.T) {
+	ep := project.Endpoint{Operation: map[string]any{"responses": map[string]any{
+		"200": map[string]any{"description": "OK", "schema": map[string]any{"type": "array", "items": map[string]any{"type": "integer"}}},
+		"400": map[string]any{"description": "Bad", "examples": map[string]any{"application/json": map[string]any{"error": "bad"}}},
+	}}}
+	want := map[string]any{"200": []any{0}, "400": map[string]any{"error": "bad"}}
+	if got := project.ResponseSamples(ep); !reflect.DeepEqual(got, want) {
+		t.Fatalf("%#v", got)
+	}
+}
+
+func TestResponseSamplesKeepReadOnlyAndDropWriteOnly(t *testing.T) {
+	user := map[string]any{"type": "object", "properties": map[string]any{
+		"id":       map[string]any{"type": "integer", "readOnly": true},
+		"password": map[string]any{"type": "string", "writeOnly": true},
+		"name":     map[string]any{"type": "string"},
+	}}
+	ep := project.Endpoint{Operation: map[string]any{
+		"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": user}}},
+		"responses":   map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": user}}}},
+	}}
+	if got := project.BodySample(ep); !reflect.DeepEqual(got, map[string]any{"password": "string", "name": "string"}) {
+		t.Fatalf("request %#v", got)
+	}
+	if got := project.ResponseSamples(ep)["200"]; !reflect.DeepEqual(got, map[string]any{"id": 0, "name": "string"}) {
+		t.Fatalf("response %#v", got)
+	}
+}
