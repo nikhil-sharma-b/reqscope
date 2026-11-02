@@ -201,6 +201,9 @@ func (m *Model) endpointPreview(e project.EndpointMatch, width int) []string {
 	}
 	if body := requestBody(e.Endpoint); body != "" {
 		lines = append(lines, "", section("Body"), body)
+		for _, line := range m.bodySample(e.Endpoint) {
+			lines = append(lines, quiet.Render(clip(line, width)))
+		}
 	}
 	if responses, _ := e.Operation["responses"].(map[string]any); len(responses) > 0 {
 		lines = append(lines, "", section("Responses"))
@@ -270,6 +273,31 @@ func (m *Model) schemaYAML(r schemaRow) []string {
 	if m.preview.key != key {
 		b := toYAML(r.schema.Definition)
 		m.preview = previewCache{key, strings.Split(strings.TrimRight(m.credentials.Sanitize(string(b)), "\n"), "\n")}
+	}
+	return m.preview.lines
+}
+
+// maxBodySampleLines keeps a large sample from pushing responses off screen.
+const maxBodySampleLines = 30
+
+// bodySample shows the body the request editor will open with, cached per
+// endpoint because the preview re-renders on every frame.
+func (m *Model) bodySample(e project.Endpoint) []string {
+	key := fmt.Sprintf("body|%d|%s", m.data.specGen, e.ID)
+	if m.preview.key != key {
+		var lines []string
+		switch v := project.BodySample(e).(type) {
+		case nil:
+		case string:
+			lines = strings.Split(strings.TrimRight(m.credentials.Sanitize(v), "\n"), "\n")
+		default:
+			b, _ := json.MarshalIndent(v, "", "  ")
+			lines = strings.Split(m.credentials.Sanitize(string(b)), "\n")
+		}
+		if len(lines) > maxBodySampleLines {
+			lines = append(lines[:maxBodySampleLines], "…")
+		}
+		m.preview = previewCache{key, lines}
 	}
 	return m.preview.lines
 }

@@ -387,3 +387,34 @@ components:
 	wantScreen(t, m, "Not used to check responses: oneOf")
 	rejectScreen(t, m, "Invoice")
 }
+
+func TestEndpointPreviewShowsBodySample(t *testing.T) {
+	root := t.TempDir()
+	project.Init(root, "Pets", false)
+	m := newModel(t, root, 150, 45)
+	document := `openapi: 3.0.3
+info: {title: Pets, version: '1'}
+paths:
+  /pets:
+    post:
+      requestBody:
+        required: true
+        content: {application/json: {schema: {$ref: '#/components/schemas/Pet'}}}
+      responses: {'201': {description: Created}}
+components:
+  schemas:
+    Pet:
+      type: object
+      properties:
+        id: {type: integer, readOnly: true}
+        nickname: {type: string, format: email}
+`
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	os.WriteFile(file, []byte(document), 0600)
+	startImport(t, m, file)
+	press(m, "enter")
+	wantScreen(t, m, "application/json", `"nickname": "user@example.com"`)
+	if strings.Contains(screen(m), `"id"`) {
+		t.Fatal("readOnly field shown in body sample")
+	}
+}
