@@ -14,10 +14,12 @@ import (
 	"go.yaml.in/yaml/v3"
 )
 
-// previewCache keeps the one preview that needs YAML rendering.
+// previewCache keeps the one preview that is costly to render: a schema's
+// YAML, or an endpoint's body samples.
 type previewCache struct {
-	key   string
-	lines []string
+	key     string
+	lines   []string
+	samples map[string][]string
 }
 
 func (m *Model) browseView(width, height int) []string {
@@ -201,7 +203,7 @@ func (m *Model) endpointPreview(e project.EndpointMatch, width int) []string {
 	}
 	if body := requestBody(e.Endpoint); body != "" {
 		lines = append(lines, "", section("Body"), body)
-		for _, line := range m.bodySample(e.Endpoint) {
+		for _, line := range m.endpointSamples(e.Endpoint)[requestSampleKey] {
 			lines = append(lines, quiet.Render(clip(line, width)))
 		}
 	}
@@ -221,6 +223,9 @@ func (m *Model) endpointPreview(e project.EndpointMatch, width int) []string {
 				style = quiet
 			}
 			lines = append(lines, row([]span{sp(pad(code, 8), style), plain(desc)}, width, false))
+			for _, line := range m.endpointSamples(e.Endpoint)[code] {
+				lines = append(lines, quiet.Render(clip("        "+line, width)))
+			}
 		}
 	}
 	lines = append(lines, "")
@@ -272,34 +277,51 @@ func (m *Model) schemaYAML(r schemaRow) []string {
 	key := fmt.Sprintf("%d|%s|%s", m.data.specGen, r.spec.ID, r.schema.ID)
 	if m.preview.key != key {
 		b := toYAML(r.schema.Definition)
-		m.preview = previewCache{key, strings.Split(strings.TrimRight(m.credentials.Sanitize(string(b)), "\n"), "\n")}
+		m.preview = previewCache{key: key, lines: strings.Split(strings.TrimRight(m.credentials.Sanitize(string(b)), "\n"), "\n")}
 	}
 	return m.preview.lines
 }
 
-// maxBodySampleLines keeps a large sample from pushing responses off screen.
-const maxBodySampleLines = 30
+// maxSampleLines keeps a large sample from pushing the rest of the details
+// off screen.
+const maxSampleLines = 30
 
-// bodySample shows the body the request editor will open with, cached per
-// endpoint because the preview re-renders on every frame.
-func (m *Model) bodySample(e project.Endpoint) []string {
-	key := fmt.Sprintf("body|%d|%s", m.data.specGen, e.ID)
+// requestSampleKey holds the request body among an endpoint's samples; status
+// codes key the response bodies.
+const requestSampleKey = "request"
+
+// endpointSamples renders the request body and every response body sample
+// once per endpoint, because the preview re-renders on every frame.
+func (m *Model) endpointSamples(e project.Endpoint) map[string][]string {
+	key := fmt.Sprintf("samples|%d|%s", m.data.specGen, e.ID)
 	if m.preview.key != key {
-		var lines []string
-		switch v := project.BodySample(e).(type) {
-		case nil:
-		case string:
-			lines = strings.Split(strings.TrimRight(m.credentials.Sanitize(v), "\n"), "\n")
-		default:
-			b, _ := json.MarshalIndent(v, "", "  ")
-			lines = strings.Split(m.credentials.Sanitize(string(b)), "\n")
+		samples := map[string][]string{}
+		if lines := m.sampleLines(project.BodySample(e)); len(lines) > 0 {
+			samples[requestSampleKey] = lines
 		}
-		if len(lines) > maxBodySampleLines {
-			lines = append(lines[:maxBodySampleLines], "…")
+		for code, v := range project.ResponseSamples(e) {
+			samples[code] = m.sampleLines(v)
 		}
-		m.preview = previewCache{key, lines}
+		m.preview = previewCache{key: key, samples: samples}
 	}
-	return m.preview.lines
+	return m.preview.samples
+}
+
+func (m *Model) sampleLines(v any) []string {
+	var lines []string
+	switch v := v.(type) {
+	case nil:
+		return nil
+	case string:
+		lines = strings.Split(strings.TrimRight(m.credentials.Sanitize(v), "\n"), "\n")
+	default:
+		b, _ := json.MarshalIndent(v, "", "  ")
+		lines = strings.Split(m.credentials.Sanitize(string(b)), "\n")
+	}
+	if len(lines) > maxSampleLines {
+		lines = append(lines[:maxSampleLines], "…")
+	}
+	return lines
 }
 
 func (m *Model) schemaPreview(r schemaRow, width int) []string {

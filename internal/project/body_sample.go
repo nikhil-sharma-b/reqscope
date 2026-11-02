@@ -23,6 +23,39 @@ func BodySample(ep Endpoint) any {
 	return nil
 }
 
+// ResponseSamples returns a sample body for each status code that declares
+// one, keyed by code. JSON is preferred when a response offers several media
+// types; codes without a body are left out.
+func ResponseSamples(ep Endpoint) map[string]any {
+	result := map[string]any{}
+	responses := object(ep.Operation["responses"])
+	for _, code := range keys(responses) {
+		r := object(responses[code])
+		var sample any
+		if content := object(r["content"]); len(content) > 0 {
+			media := keys(content)[0]
+			if _, ok := content["application/json"]; ok {
+				media = "application/json"
+			}
+			sample = mediaSample(object(content[media]))
+		} else {
+			// Swagger 2 puts the schema on the response and examples by MIME type.
+			examples := object(r["examples"])
+			if ex, ok := examples["application/json"]; ok {
+				sample = ex
+			} else if names := keys(examples); len(names) > 0 {
+				sample = examples[names[0]]
+			} else if schema := object(r["schema"]); schema != nil {
+				sample = SchemaSample(schema)
+			}
+		}
+		if sample != nil {
+			result[code] = sample
+		}
+	}
+	return result
+}
+
 // mediaSample returns a body suggestion for one media type entry: the
 // contract's own example first, then the first named example, then a sample
 // built from the schema.

@@ -400,7 +400,8 @@ paths:
       requestBody:
         required: true
         content: {application/json: {schema: {$ref: '#/components/schemas/Pet'}}}
-      responses: {'201': {description: Created}}
+      responses:
+        '201': {description: Created, content: {application/json: {schema: {type: object, properties: {created: {type: string, format: date-time}}}}}}
 components:
   schemas:
     Pet:
@@ -413,7 +414,7 @@ components:
 	os.WriteFile(file, []byte(document), 0600)
 	startImport(t, m, file)
 	press(m, "enter")
-	wantScreen(t, m, "application/json", `"nickname": "user@example.com"`)
+	wantScreen(t, m, "application/json", `"nickname": "user@example.com"`, `"created": "2026-01-01T00:00:00Z"`)
 	if strings.Contains(screen(m), `"id"`) {
 		t.Fatal("readOnly field shown in body sample")
 	}
