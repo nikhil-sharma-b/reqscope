@@ -8,6 +8,9 @@
 │          │   t                Group endpoints by tag                                  │          │
 │          │   s                Switch between endpoints and schemas                    │          │
 │          │   R                Re-read the API source and review the changes           │          │
+│          │   u                Copy the full URL for the active environment; empty     │          │
+│          │ path inputs stay as {name}                                                 │          │
+│          │   p                Copy the path; empty path inputs stay as {name}         │          │
 │          │                                                                            │          │
 │          │ Lists                                                                      │          │
 │          │   enter            Open the selection                                      │          │
@@ -21,10 +24,7 @@
 │          │   ?                Show the keys for this screen                           │          │
 │          │   : ctrl+p         Search every command                                    │          │
 │          │   e                Switch environment                                      │          │
-│          │   1                Go to endpoints                                         │          │
-│          │   2                Go to saved requests                                    │          │
-│          │   3                Go to scenarios                                         │          │
-│          ├───────────────────────────────────────────────────────────── ↓ 1–24 of 41 ─┤          │
+│          ├───────────────────────────────────────────────────────────── ↓ 1–24 of 44 ─┤          │
 │          │ j/k scroll   esc close                                                     │          │
 ╰──────────╰────────────────────────────────────────────────────────────────────────────╯──────────╯
  enter open   / filter   i import   v contract   n new   m method   space menu   ? keys             

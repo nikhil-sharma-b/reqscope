@@ -131,8 +131,8 @@ func actionTable() []actionDef {
 
 		{actSend, "send", "Send the request", []string{"s"}, []scope{scopeRequest}, 1},
 		{actSave, "save", "Save the request", []string{"ctrl+s"}, []scope{scopeRequest}, 7},
-		{actCopyURL, "copy URL", "Copy the full request URL for the active environment", []string{"u"}, []scope{scopeRequest}, 0},
-		{actCopyPath, "copy path", "Copy the request path for the active environment", []string{"p"}, []scope{scopeRequest}, 0},
+		{actCopyURL, "copy URL", "Copy the full URL for the active environment; empty path inputs stay as {name}", []string{"u"}, []scope{scopeRequest, scopeEndpoints}, 0},
+		{actCopyPath, "copy path", "Copy the path; empty path inputs stay as {name}", []string{"p"}, []scope{scopeRequest, scopeEndpoints}, 0},
 		{actEditRaw, "edit JSON", "Edit the whole request as JSON in your editor", []string{"E"}, []scope{scopeRequest}, 0},
 
 		{actEdit, "edit", "Edit the selected field", []string{"enter"}, []scope{scopeForm}, 2},

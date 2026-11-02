@@ -1588,32 +1588,29 @@ func (f *fileModal) content(m *Model, width, height int) (string, []string, []st
 // copyTarget resolves the request against the active environment and copies
 // the credential-sanitized URL, or only its path when pathOnly is set.
 func (m *Model) copyTarget(d *draft, pathOnly bool) tea.Cmd {
+	return m.copyDestination(project.CloneDraft(d.request), pathOnly, "request")
+}
+
+// copyDestination copies where a draft would go. Empty path inputs stay as
+// {name} placeholders, so a draft copies before every value is filled in.
+func (m *Model) copyDestination(request project.RequestDraft, pathOnly bool, subject string) tea.Cmd {
 	if m.data.activeEnv == "" {
 		m.say("Choose an environment first so the URL can be resolved")
 		return nil
 	}
-	request := project.CloneDraft(d.request)
 	root, env, creds := m.root, m.data.activeEnv, m.credentials
-	return m.waitFor("Resolving the request…", func() applyMsg {
-		p, err := project.PrepareRequestWithCredentials(root, env, request, true, creds)
+	return m.waitFor("Resolving the "+subject+"…", func() applyMsg {
+		full, path, err := project.DraftDestination(root, env, request, creds)
 		return func(m *Model) tea.Cmd {
 			if err != nil {
 				m.fail(err)
 				return nil
 			}
-			text, what := p.URL, "URL"
+			text, what := full, "URL"
 			if pathOnly {
-				u, perr := url.Parse(p.URL)
-				if perr != nil {
-					m.fail(perr)
-					return nil
-				}
-				text, what = u.EscapedPath(), "path"
-				if text == "" {
-					text = "/"
-				}
+				text, what = path, "path"
 			}
-			m.ok("Copied the request " + what)
+			m.ok("Copied the " + subject + " " + what)
 			return tea.SetClipboard(text)
 		}
 	})

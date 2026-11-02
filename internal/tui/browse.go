@@ -592,6 +592,18 @@ func (m *Model) endpointAction(id action) (bool, tea.Cmd) {
 		m.schemas = !m.schemas
 		m.lists[endpointsTab] = listState{}
 		m.skipHeader(1)
+	case actCopyURL, actCopyPath:
+		e, ok := m.selectedEndpoint()
+		if !ok || m.schemas {
+			return true, nil
+		}
+		if id == actCopyPath && m.data.activeEnv == "" {
+			// Without an environment there is no base path; copy the path as listed.
+			m.ok("Copied the endpoint path")
+			return true, tea.SetClipboard(e.Path)
+		}
+		d, _ := project.EndpointDraft(e.Endpoint)
+		return true, m.copyDestination(d, id == actCopyPath, "endpoint")
 	case actRefreshSource:
 		return true, m.refreshSource()
 	case actEditContract:
