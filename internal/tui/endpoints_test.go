@@ -418,3 +418,34 @@ components:
 		t.Fatal("readOnly field shown in body sample")
 	}
 }
+
+// clipboardOf runs one key's work and returns the text it put on the clipboard.
+func clipboardOf(m *tui.Model, key string) string {
+	cmd := send(m, key)
+	for depth := 0; cmd != nil && depth < 20; depth++ {
+		msg := cmd()
+		if strings.Contains(fmt.Sprintf("%T", msg), "lipboard") {
+			return fmt.Sprint(msg)
+		}
+		if msg == nil {
+			return ""
+		}
+		_, cmd = m.Update(msg)
+	}
+	return ""
+}
+
+func TestEndpointListCopiesPathAsListed(t *testing.T) {
+	root := t.TempDir()
+	project.Init(root, "Pets", false)
+	m := newModel(t, root, 150, 45)
+	document := "openapi: 3.0.3\ninfo: {title: Pets, version: '1'}\npaths: {'/pets/{id}': {get: {parameters: [{name: id, in: path, required: true, schema: {type: integer}}], responses: {'200': {description: OK}}}}}\n"
+	file := filepath.Join(t.TempDir(), "api.yaml")
+	os.WriteFile(file, []byte(document), 0600)
+	startImport(t, m, file)
+	press(m, "enter")
+	if got := clipboardOf(m, "p"); got != "/pets/{id}" {
+		t.Fatalf("clipboard %q\n%s", got, screen(m))
+	}
+	wantScreen(t, m, "Copied the endpoint path")
+}

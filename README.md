@@ -202,7 +202,7 @@ shown in full, with query values left out and unfilled parameters highlighted.
 | `E` | Edit the whole request as JSON for timeouts, redirects and limits |
 | `Ctrl+s` | Save as a saved request, or save changes to one |
 | `/`, `y`, `H` | In the response: find, copy the body, show headers |
-| `u`, `p` | In the request: copy the resolved URL, copy its path (needs an active environment) |
+| `u`, `p` | In the request or endpoint list: copy the resolved URL, copy its path. Empty path inputs stay as `{name}`. The URL needs an active environment; without one, `p` on an endpoint copies the path as listed |
 
 Drafts are kept per endpoint and per saved request for the session, so moving
 between them never loses typing. Saved requests with unsaved edits are marked
