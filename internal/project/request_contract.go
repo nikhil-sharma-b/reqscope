@@ -103,7 +103,7 @@ func EndpointDraft(ep Endpoint) (RequestDraft, []GuidedField) {
 				}
 				fields = append(fields, guidedFormFields(object(object(content[d.ContentType])["schema"]))...)
 			} else {
-				fields = append(fields, GuidedField{"body", "body", required, description, mediaSample(object(content[d.ContentType]))})
+				fields = append(fields, GuidedField{"body", "body", required, description, mediaSample(object(content[d.ContentType]), SchemaSample)})
 			}
 		}
 	}

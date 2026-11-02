@@ -7,7 +7,13 @@ const maxSampleDepth = 8
 // expects. References are already resolved when specifications load, so the
 // schema is a plain tree.
 func SchemaSample(schema map[string]any) any {
-	return sampleValue(schema, 0)
+	return sampleValue(schema, 0, "readOnly")
+}
+
+// responseSchemaSample keeps readOnly fields, which servers return, and drops
+// writeOnly ones, which they never send back.
+func responseSchemaSample(schema map[string]any) any {
+	return sampleValue(schema, 0, "writeOnly")
 }
 
 // BodySample returns the body a request draft for ep would start from, so
@@ -37,7 +43,7 @@ func ResponseSamples(ep Endpoint) map[string]any {
 			if _, ok := content["application/json"]; ok {
 				media = "application/json"
 			}
-			sample = mediaSample(object(content[media]))
+			sample = mediaSample(object(content[media]), responseSchemaSample)
 		} else {
 			// Swagger 2 puts the schema on the response and examples by MIME type.
 			examples := object(r["examples"])
@@ -46,7 +52,7 @@ func ResponseSamples(ep Endpoint) map[string]any {
 			} else if names := keys(examples); len(names) > 0 {
 				sample = examples[names[0]]
 			} else if schema := object(r["schema"]); schema != nil {
-				sample = SchemaSample(schema)
+				sample = responseSchemaSample(schema)
 			}
 		}
 		if sample != nil {
@@ -59,7 +65,7 @@ func ResponseSamples(ep Endpoint) map[string]any {
 // mediaSample returns a body suggestion for one media type entry: the
 // contract's own example first, then the first named example, then a sample
 // built from the schema.
-func mediaSample(entry map[string]any) any {
+func mediaSample(entry map[string]any, build func(map[string]any) any) any {
 	if ex, ok := entry["example"]; ok && ex != nil {
 		return ex
 	}
@@ -70,12 +76,13 @@ func mediaSample(entry map[string]any) any {
 		}
 	}
 	if schema := object(entry["schema"]); schema != nil {
-		return SchemaSample(schema)
+		return build(schema)
 	}
 	return nil
 }
 
-func sampleValue(s map[string]any, depth int) any {
+// skip names the boolean flag (readOnly or writeOnly) whose fields are left out.
+func sampleValue(s map[string]any, depth int, skip string) any {
 	if s == nil {
 		return nil
 	}
@@ -88,13 +95,13 @@ func sampleValue(s map[string]any, depth int) any {
 		return values[0]
 	}
 	if branches := anyList(s["oneOf"]); len(branches) > 0 {
-		return sampleValue(object(branches[0]), depth)
+		return sampleValue(object(branches[0]), depth, skip)
 	}
 	if branches := anyList(s["anyOf"]); len(branches) > 0 {
-		return sampleValue(object(branches[0]), depth)
+		return sampleValue(object(branches[0]), depth, skip)
 	}
 	if parts := anyList(s["allOf"]); len(parts) > 0 {
-		return sampleValue(mergeAllOf(s, parts), depth)
+		return sampleValue(mergeAllOf(s, parts), depth, skip)
 	}
 	kind, _ := s["type"].(string)
 	if list := anyList(s["type"]); kind == "" && len(list) > 0 {
@@ -122,17 +129,17 @@ func sampleValue(s map[string]any, depth int) any {
 		props := object(s["properties"])
 		for _, name := range keys(props) {
 			p := object(props[name])
-			if p["readOnly"] == true {
+			if p[skip] == true {
 				continue
 			}
-			result[name] = sampleValue(p, depth+1)
+			result[name] = sampleValue(p, depth+1, skip)
 		}
 		return result
 	case "array":
 		if depth >= maxSampleDepth {
 			return []any{}
 		}
-		return []any{sampleValue(object(s["items"]), depth+1)}
+		return []any{sampleValue(object(s["items"]), depth+1, skip)}
 	case "integer":
 		return 0
 	case "number":

@@ -108,3 +108,21 @@ func TestResponseSamplesSwagger2(t *testing.T) {
 		t.Fatalf("%#v", got)
 	}
 }
+
+func TestResponseSamplesKeepReadOnlyAndDropWriteOnly(t *testing.T) {
+	user := map[string]any{"type": "object", "properties": map[string]any{
+		"id":       map[string]any{"type": "integer", "readOnly": true},
+		"password": map[string]any{"type": "string", "writeOnly": true},
+		"name":     map[string]any{"type": "string"},
+	}}
+	ep := project.Endpoint{Operation: map[string]any{
+		"requestBody": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": user}}},
+		"responses":   map[string]any{"200": map[string]any{"content": map[string]any{"application/json": map[string]any{"schema": user}}}},
+	}}
+	if got := project.BodySample(ep); !reflect.DeepEqual(got, map[string]any{"password": "string", "name": "string"}) {
+		t.Fatalf("request %#v", got)
+	}
+	if got := project.ResponseSamples(ep)["200"]; !reflect.DeepEqual(got, map[string]any{"id": 0, "name": "string"}) {
+		t.Fatalf("response %#v", got)
+	}
+}
