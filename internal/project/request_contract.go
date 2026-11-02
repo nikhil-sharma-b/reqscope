@@ -69,6 +69,13 @@ func EndpointDraft(ep Endpoint) (RequestDraft, []GuidedField) {
 		if example == nil {
 			example = object(p["schema"])["example"]
 		}
+		if in == "body" {
+			// Swagger 2 names the body parameter freely; callers look it up as "body".
+			name = "body"
+			if example == nil {
+				example = SchemaSample(object(p["schema"]))
+			}
+		}
 		if in == "formData" {
 			in = "form"
 			if p["type"] == "file" || object(p["items"])["type"] == "file" {
@@ -96,7 +103,7 @@ func EndpointDraft(ep Endpoint) (RequestDraft, []GuidedField) {
 				}
 				fields = append(fields, guidedFormFields(object(object(content[d.ContentType])["schema"]))...)
 			} else {
-				fields = append(fields, GuidedField{"body", "body", required, description, object(content[d.ContentType])["example"]})
+				fields = append(fields, GuidedField{"body", "body", required, description, mediaSample(object(content[d.ContentType]))})
 			}
 		}
 	}
