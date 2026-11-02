@@ -19,14 +19,14 @@
 │                                                            ││                                                        │
 │ Variables ──────────────────────────────────────────────── ││                                                        │
 │   + add                                                    ││                                                        │
-│                                                            ││                                                        │
 │                                                            ││      ╭─ space r ───────────────────────── esc close ─╮ │
-│                                                            ││      │ s → send                t → body type         │ │
-│                                                            ││      │ w → save                a → attach file       │ │
-│                                                            ││      │ W → save as new         m → method            │ │
-│                                                            ││      │ n → new blank request   x → clear             │ │
-│                                                            ││      │ j → edit as JSON        k → cancel running    │ │
-│                                                            ││      │ b → edit body                                 │ │
+│                                                            ││      │ s → send                a → attach file       │ │
+│                                                            ││      │ w → save                m → method            │ │
+│                                                            ││      │ W → save as new         x → clear             │ │
+│                                                            ││      │ n → new blank request   k → cancel running    │ │
+│                                                            ││      │ j → edit as JSON        u → copy URL          │ │
+│                                                            ││      │ b → edit body           p → copy path         │ │
+│                                                            ││      │ t → body type                                 │ │
 │                                                            ││      ╰───────────────────────────────────────────────╯ │
 ╰────────────────────────────────────────────────────────────╯╰────────────────────────────────────────────────────────╯
  space r …   esc close   backspace up                                                                                   
