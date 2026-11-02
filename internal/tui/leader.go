@@ -54,6 +54,8 @@ func leaderTree() *leaderGroup {
 			do("m", "method", actMethodCycle),
 			do("x", "clear", actClearRequest),
 			do("k", "cancel running", actCancel),
+			do("u", "copy URL", actCopyURL),
+			do("p", "copy path", actCopyPath),
 		),
 		group("o", "response",
 			do("y", "copy body", actCopy),

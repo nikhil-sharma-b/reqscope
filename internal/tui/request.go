@@ -769,7 +769,7 @@ func (m *Model) requestAction(id action) (bool, tea.Cmd) {
 	if m.req == nil {
 		switch id {
 		case actSend, actSave, actEditRaw, actEdit, actAdd, actRemove, actMethodCycle,
-			actBody, actBodyType, actAttach, actFind, actCopy, actHeaders, actClearRequest, actSaveAsNew, actReloadCase:
+			actBody, actBodyType, actAttach, actFind, actCopy, actCopyURL, actCopyPath, actHeaders, actClearRequest, actSaveAsNew, actReloadCase:
 			m.say("Open an endpoint or saved request first")
 			return true, nil
 		}
@@ -839,6 +839,8 @@ func (m *Model) requestAction(id action) (bool, tea.Cmd) {
 			m.ok("Copied the response body")
 			return true, tea.SetClipboard(d.exchange.Body)
 		}
+	case actCopyURL, actCopyPath:
+		return true, m.copyTarget(d, id == actCopyPath)
 	case actHeaders:
 		d.headers = !d.headers
 	case actClearRequest:
@@ -1581,4 +1583,38 @@ func (f *fileModal) content(m *Model, width, height int) (string, []string, []st
 		body = append(body, "", badStyle.Render(f.err))
 	}
 	return "Choose a file", body, []string{hint("enter", "open or choose"), hint("h", "up a folder"), hint("esc", "cancel")}
+}
+
+// copyTarget resolves the request against the active environment and copies
+// the credential-sanitized URL, or only its path when pathOnly is set.
+func (m *Model) copyTarget(d *draft, pathOnly bool) tea.Cmd {
+	if m.data.activeEnv == "" {
+		m.say("Choose an environment first so the URL can be resolved")
+		return nil
+	}
+	request := project.CloneDraft(d.request)
+	root, env, creds := m.root, m.data.activeEnv, m.credentials
+	return m.waitFor("Resolving the request…", func() applyMsg {
+		p, err := project.PrepareRequestWithCredentials(root, env, request, true, creds)
+		return func(m *Model) tea.Cmd {
+			if err != nil {
+				m.fail(err)
+				return nil
+			}
+			text, what := p.URL, "URL"
+			if pathOnly {
+				u, perr := url.Parse(p.URL)
+				if perr != nil {
+					m.fail(perr)
+					return nil
+				}
+				text, what = u.EscapedPath(), "path"
+				if text == "" {
+					text = "/"
+				}
+			}
+			m.ok("Copied the request " + what)
+			return tea.SetClipboard(text)
+		}
+	})
 }
